@@ -24,8 +24,8 @@ import json
 from pathlib import Path
 
 OUT = Path("data/contrast")
-# ponytail: plain-text roles, not a chat template — keeps the file model-agnostic.
-# If a model's own template matters, re-render at fit time from `prefix`/`text`.
+# Plain-text roles keep the file model-agnostic; jspace.render() re-renders
+# `request`/`response` through a tokenizer's chat template when asked.
 TEMPLATE = "User: {request}\n\nAssistant: {response}"
 
 
@@ -62,6 +62,9 @@ def harmful_advice(category: str | None, safe_max: int, harm_min: int) -> list[d
                 "text": TEMPLATE.format(request=request, response=row["response"]),
                 "label": label,
                 "prefix": TEMPLATE.format(request=request, response=""),
+                # Raw parts, so a chat template can be applied at run time.
+                "request": request,
+                "response": row["response"],
                 "pair": pair_id,
                 "harm_level": row["harm_level"],
                 "category": row["category"],

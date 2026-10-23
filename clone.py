@@ -84,49 +84,35 @@ def estimate(res: dict, event: np.ndarray, k: float) -> float:
 
 
 def llm_step(hf, tok, model, u: torch.Tensor, layer: int, *, block_tokens: int,
-             temperature: float, eos: list[int]):
+             temperature: float, eos: list[int], pad: int):
     """A block of generation for every walker. State = dict(ids, smax, done, last).
 
     Finished walkers (EOS seen) are frozen: their block score repeats the last
     one they earned. ponytail: their ids still get fed to generate (wasted but
-    harmless); mask them out if block count × walkers ever hurts.
+    harmless); mask them out if block count x walkers ever hurts.
     """
-    rec: list[torch.Tensor] = []
-    pad = tok.pad_token_id
-
-    def hook(module, inputs, output):
-        h = output if torch.is_tensor(output) else output[0]
-        rec.append((h[:, -1, :].float() @ u).cpu())
-
-    handle = model.layers[layer].register_forward_hook(hook)
+    proj = jspace.Projector(model, u[None], [layer])
+    kwargs = jspace.sampling(temperature, block_tokens, pad)
 
     def step(states):
         ids = torch.stack([s["ids"] for s in states]).to(model.input_device)
-        rec.clear()
+        proj.clear()
         with torch.no_grad():
-            gen = hf.generate(
-                input_ids=ids, attention_mask=(ids != pad).long(), do_sample=True,
-                temperature=temperature, top_k=0, top_p=1.0, max_new_tokens=block_tokens,
-                pad_token_id=pad, return_dict_in_generate=True,
-            )
-        new_ids = gen.sequences.cpu()
-        toks = new_ids[:, ids.shape[1]:]
-        s = torch.stack(rec, 1).numpy()  # [N, L'] projection that produced each token
-        is_eos = torch.isin(toks, torch.tensor(eos)).numpy()
-        out, A = [], np.zeros(len(states))
-        for n, st in enumerate(states):
-            if st["done"]:
-                out.append({**st, "ids": new_ids[n]})
-                A[n] = st["last"]
-                continue
-            e = int(is_eos[n].argmax()) if is_eos[n].any() else toks.shape[1] - 1
-            vals = s[n, : e + 1]
-            A[n] = vals.mean()
-            out.append({"ids": new_ids[n], "smax": max(st["smax"], float(vals.max())),
-                        "done": bool(is_eos[n].any()), "last": float(A[n])})
-        return out, A
+            new = hf.generate(input_ids=ids, attention_mask=(ids != pad).long(), **kwargs).sequences.cpu()
+        toks = new[:, ids.shape[1]:]
+        s = proj.stack()[:, :, 0].numpy()  # [N, L'] projection that produced each token
+        fe = jspace.first_eos(toks, eos).numpy()
+        # Genuine steps run up to and including the one that produced the EOS.
+        m = np.arange(toks.shape[1])[None, :] <= np.minimum(fe, toks.shape[1] - 1)[:, None]
+        was_done = np.array([st["done"] for st in states])
+        A = np.where(was_done, [st["last"] for st in states], (s * m).sum(1) / m.sum(1))
+        smax = np.maximum([st["smax"] for st in states],
+                          np.where(was_done, -np.inf, np.where(m, s, -np.inf).max(1)))
+        done = was_done | (fe < toks.shape[1])
+        return [{"ids": new[n], "smax": smax[n], "done": bool(done[n]), "last": A[n]}
+                for n in range(len(states))], A
 
-    step.remove = handle.remove
+    step.remove = proj.remove
     return step
 
 
@@ -151,26 +137,18 @@ def main() -> None:
     p.add_argument("--dtype", default="bfloat16")
     args = p.parse_args()
 
-    axes_dir = jspace.model_dir(args.model) / "axes"
-    axes = torch.load(axes_dir / f"{args.axes}.pt", weights_only=True)
-    sep = json.loads((axes_dir / f"{args.axes}.json").read_text())["separation"][args.method]
-    layer = args.layer if args.layer is not None else int(np.argmax([pl["d_prime"] for pl in sep]))
-    st = axes["stats"][args.method]
+    U, st, d_prime, template = jspace.load_axes(args.model, args.axes, args.method)
+    layer = args.layer if args.layer is not None else int(np.argmax(d_prime))
     s_star = (st["mu_safe"][layer] + st["mu_harm"][layer]) / 2
     a = args.a if args.a is not None else s_star
-    rows = jspace.load_jsonl(args.data)
-    prompt = list(dict.fromkeys(r["prefix"].rstrip() for r in rows))[args.prompt]
 
     model, hf, tok = jspace.load_model(args.model, device=args.device, dtype=args.dtype)
-    if tok.pad_token_id is None:
-        tok.pad_token = tok.eos_token
-    e = hf.generation_config.eos_token_id
-    eos = sorted({*([e] if isinstance(e, int) else list(e or [])), tok.eos_token_id})
-    u = axes["u"][args.method][layer].to(model.input_device)
+    prompt = jspace.prompts(jspace.load_jsonl(args.data), tok, template)[args.prompt]
+    eos, pad = jspace.generation_setup(hf, tok)
     ids0 = model.encode(prompt)[0].cpu()
-    step = llm_step(hf, tok, model, u, layer, block_tokens=args.block_tokens,
-                    temperature=args.temperature, eos=eos)
-    print(f"{model} | layer {layer} d'={sep[layer]['d_prime']:.2f} | s*={s_star:.2f} a={a:.2f} | "
+    step = llm_step(hf, tok, model, U[layer], layer, block_tokens=args.block_tokens,
+                    temperature=args.temperature, eos=eos, pad=pad)
+    print(f"{model} | layer {layer} d'={d_prime[layer]:.2f} | s*={s_star:.2f} a={a:.2f} | "
           f"N={args.walkers} L={args.blocks}x{args.block_tokens} tokens | prompt {args.prompt}")
 
     runs, samples = [], []
@@ -217,7 +195,7 @@ def main() -> None:
     out.mkdir(exist_ok=True)
     name = args.name or f"{args.axes}-{args.method}-L{layer}-p{args.prompt}-T{args.temperature}"
     (out / f"{name}.json").write_text(json.dumps({
-        "model": args.model, "axes": args.axes, "method": args.method, "layer": layer,
+        "model": args.model, "axes": args.axes, "method": args.method, "template": template, "layer": layer,
         "s_star": s_star, "a": a, "prompt": prompt, "temperature": args.temperature,
         "walkers": args.walkers, "blocks": args.blocks, "block_tokens": args.block_tokens,
         "completions_per_run": args.walkers * args.blocks * args.block_tokens,

@@ -34,9 +34,9 @@ survival) against growing as `e^{εt/T}` (Gompertz). `landscape.py` fits both.
 
 | File | What |
 |---|---|
-| `jspace.py` | model loading, run paths (shared by everything) |
+| `jspace.py` | model loading, run paths, contrast-row rendering (plain or chat template), axis loading, generation helpers: pure-T sampling kwargs, EOS masking, projection hooks |
 | `make_data.py` | paired safe/harmful responses → `data/contrast/*.jsonl`: the labels behind every axis |
-| `axes.py` | per-layer directions `diffmean`, `pullback` (needs `base/lens.pt`), `contrast` (needs `contrast/lens.pt`); held-out d', AUC, pair accuracy; class means for `s*` → `axes/<set>.{pt,json}` |
+| `axes.py` | per-layer directions `diffmean`, `pullback` (needs `base/lens.pt`), `contrast` (needs `contrast/lens.pt`); held-out d', AUC, pair accuracy; class means for `s*`; `--template plain\|chat` → `axes/<set>.{pt,json}` |
 | `trajectory.py` | sample at temperature T, record `s[n, t, l]` for every layer → `traj/<name>.pt` |
 | `landscape.py` | model-free: potential, Kramers–Moyal drift/diffusion, Ornstein–Uhlenbeck well per time window, Kaplan–Meier survival, fits A/B → `traj/<name>.landscape.json` |
 | `clone.py` | GKTL cloning on one prompt, `k = 0` is brute force on the same budget → `clone/<name>.json` |
@@ -90,9 +90,11 @@ tokens × batch, and `d_model` matters far less than for fitting a lens.
   tilt: raw fraction near 1/2, parent fraction well above `1/N`. `k = 0` is
   the reference. An estimate scattering over decades with raw fraction 1.0
   means `k` overshot.
-- **Same template everywhere.** Axes, trajectories and cloning use the data's
-  plain `User: … / Assistant:` rendering, not the chat template, so `s*`
-  refers to one distribution. Qwen3 therefore runs without `<think>`.
+- **Same rendering everywhere.** `axes.py --template plain|chat` decides how
+  the contrast rows are rendered and the other scripts reuse what the axes
+  were built with, so `s*` refers to one distribution. Plain is the data's
+  `User: … / Assistant:` text (Qwen3 then runs without `<think>`); chat is the
+  tokenizer's template, the right choice for instruct models.
   `--temperature` is pure (top-k/top-p off), as the theory requires.
 - **Coherence is a confound.** Degenerate text sits on the unsafe side of the
   diffmean axis (the T = 1.3 row below). Before reading an axis as "safety",

@@ -7,21 +7,23 @@ Three constructions, all scored on the same paired safe/harmful responses
 (make_data.py), so they can be compared on one footing:
 
   diffmean  mean response residual of the harmful class minus the safe one,
-            per layer (Arditi et al.; the default of the proposal, Part B2).
+            per layer (Arditi et al.; the proposal's default, Part B2).
   pullback  a_l = J_l^T w: the final-layer diffmean w pulled back through the
             web-text lens (Part B2, Fig. 2d). Needs runs/<model>/base/lens.pt.
-  contrast  top right-singular vector of J_diff[l] — the layer-l residual
-            direction whose transport differs most between the classes.
-            Needs runs/<model>/contrast/lens.pt. Sign aligned to diffmean.
+  contrast  top right-singular vector of J_diff[l], the layer-l direction
+            whose transport differs most between the classes. Needs
+            runs/<model>/contrast/lens.pt. Sign aligned to diffmean.
 
-"Measurable" is decided per layer from the per-response mean projection:
-d' between the classes, AUC, and the fraction of pairs ordered correctly
-(harmful above safe) — scored on held-out pairs (odd pair ids), with the
-directions rebuilt from the even ones. The saved vectors use every pair. The
-lenses behind pullback/contrast were themselves fitted on all pairs, so for
-those two the split only guards the diffmean part. The .pt carries
-mu_safe / mu_harm / sigma per layer so trajectory.py and landscape.py can
-place the threshold s*.
+"Measurable" is decided per layer from the per-response mean projection: d'
+between the classes, AUC, and the fraction of pairs ordered correctly
+(harmful above safe), scored on held-out pairs (odd ids) with the directions
+rebuilt from the even ones. The saved vectors use every pair. The lenses
+behind pullback/contrast were fitted on all pairs, so for those two the split
+only guards the diffmean part. The .pt carries mu_safe / mu_harm / sigma per
+layer so trajectory.py and clone.py can place the threshold s*.
+
+--template chat renders the rows through the tokenizer's chat template
+(instruct models); downstream scripts reuse whatever the axes were built with.
 
 Residual indexing follows jlens: layer l is the output of block l, so the
 final layer is n_layers - 1 (what the lens transports *to*).
@@ -34,21 +36,21 @@ import json
 import time
 
 import torch
-from jlens import ActivationRecorder
+from jlens import ActivationRecorder, JacobianLens
 
 import jspace
 
 
-def response_means(model, rows: list[dict], max_seq_len: int) -> torch.Tensor:
+def response_means(model, tok, rows: list[dict], template: str, max_seq_len: int) -> torch.Tensor:
     """[n_rows, n_layers, d]: residual averaged over each row's response tokens."""
     layers = list(range(model.n_layers))
     H = torch.zeros(len(rows), model.n_layers, model.d_model)
     t0 = time.perf_counter()
     for i, row in enumerate(rows):
-        ids = model.encode(row["text"], max_length=max_seq_len)
-        # Response starts where the shared prefix ends; the prefix is the
-        # request and must not enter the class means (same rule as contrast.py).
-        p0 = model.encode(row["prefix"], max_length=max_seq_len).shape[1] if row.get("prefix") else 1
+        r = jspace.render(row, tok, template)
+        ids = model.encode(r["text"], max_length=max_seq_len)
+        # The request must not enter the class means (same rule as contrast.py).
+        p0 = model.encode(r["prefix"], max_length=max_seq_len).shape[1]
         if ids.shape[1] <= p0:
             raise SystemExit(f"row {i}: truncated to the prefix, raise --max-seq-len")
         with torch.no_grad(), ActivationRecorder(model.layers, at=layers) as rec:
@@ -63,20 +65,15 @@ def response_means(model, rows: list[dict], max_seq_len: int) -> torch.Tensor:
 def separation(score: torch.Tensor, y: torch.Tensor, pair: torch.Tensor) -> dict:
     """How well a 1-D score tells harmful (y=-1) from safe (y=+1) responses."""
     h, s = score[y == -1], score[y == 1]
-    d_prime = (h.mean() - s.mean()) / ((h.var() + s.var()) / 2).sqrt()
-    auc = (h[:, None] > s[None, :]).float().mean()
-    # Paired accuracy: the harmful member above the safe one, pair by pair.
-    pairs = {}
-    for v, lab, pid in zip(score.tolist(), y.tolist(), pair.tolist(), strict=True):
-        pairs.setdefault(pid, {})[lab] = v
-    ordered = [p[-1] > p[1] for p in pairs.values() if len(p) == 2]
+    sigma = ((h.var() + s.var()) / 2).sqrt()
+    # Rows come in complete pairs (make_data.py): sort by (pair, label) and
+    # fold into [n_pairs, 2] = [harmful, safe].
+    pm = score[torch.argsort(pair * 2 + (y == 1).long())].view(-1, 2)
     return {
-        "d_prime": d_prime.item(),
-        "auc": auc.item(),
-        "pair_acc": sum(ordered) / max(len(ordered), 1),
-        "mu_safe": s.mean().item(),
-        "mu_harm": h.mean().item(),
-        "sigma": ((h.var() + s.var()) / 2).sqrt().item(),
+        "d_prime": ((h.mean() - s.mean()) / sigma).item(),
+        "auc": (h[:, None] > s[None, :]).float().mean().item(),
+        "pair_acc": (pm[:, 0] > pm[:, 1]).float().mean().item(),
+        "mu_safe": s.mean().item(), "mu_harm": h.mean().item(), "sigma": sigma.item(),
     }
 
 
@@ -84,45 +81,33 @@ def unit(v: torch.Tensor) -> torch.Tensor:
     return v / v.norm(dim=-1, keepdim=True).clamp_min(1e-12)
 
 
-def build(model, H: torch.Tensor, y: torch.Tensor, model_id: str) -> dict[str, torch.Tensor]:
-    """{method: [n_layers, d] unit vectors} from the response means of one split."""
-    from jlens import JacobianLens
-
-    n_layers, last = model.n_layers, model.n_layers - 1
+def directions(H, y, J: dict | None, V: torch.Tensor | None) -> dict[str, torch.Tensor]:
+    """{method: [n_layers, d] unit vectors}. J: the web-text lens' {layer: J_l};
+    V: unsigned top right-singular vectors of J_diff, NaN rows where absent."""
     # u points toward the unsafe class: label -1 is harmful (make_data.py).
-    methods = {"diffmean": unit(H[y == -1].mean(0) - H[y == 1].mean(0))}
+    u = unit(H[y == -1].mean(0) - H[y == 1].mean(0))
+    out = {"diffmean": u}
+    if J is not None:  # identity at the final layer, which the lens maps *to*
+        w = u[-1]
+        out["pullback"] = unit(torch.stack([J[l].T @ w if l in J else w for l in range(len(u))]))
+    if V is not None:  # the SVD fixes (u_k, v_k) only up to a shared sign
+        sign = torch.nan_to_num((V * u).sum(1, keepdim=True)).sign()
+        out["contrast"] = unit(torch.where(V.isnan(), u, V * torch.where(sign == 0, 1.0, sign)))
+    return out
 
-    # Lenses are optional: without them only diffmean is built.
-    base = jspace.run_dir(model_id, "base") / "lens.pt"
-    if base.exists():
-        lens = JacobianLens.load(str(base))  # ponytail: reloaded per call, 2 calls
-        w = methods["diffmean"][last]
-        U = torch.stack([
-            lens.jacobians[l].T @ w if l in lens.jacobians else w for l in range(n_layers)
-        ])
-        methods["pullback"] = unit(U)
 
-    contrast = jspace.run_dir(model_id, "contrast") / "lens.pt"
-    if contrast.exists():
-        diff = JacobianLens.load(str(contrast))
-        U = torch.zeros(n_layers, model.d_model)
-        for l in range(n_layers):
-            if l not in diff.jacobians:
-                U[l] = methods["diffmean"][l]
-                continue
-            _, _, Vh = torch.linalg.svd(diff.jacobians[l], full_matrices=False)
-            v = Vh[0]
-            # The SVD fixes (u_k, v_k) only up to a shared sign.
-            U[l] = v if v @ methods["diffmean"][l] >= 0 else -v
-        methods["contrast"] = unit(U)
-
-    return methods
+def top_singular_vectors(lens: JacobianLens, n_layers: int, device: str) -> torch.Tensor:
+    V = torch.full((n_layers, lens.d_model), float("nan"))
+    for l, A in lens.jacobians.items():
+        V[l] = torch.linalg.svd(A.to(device), full_matrices=False).Vh[0].cpu()
+    return V
 
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--model", required=True)
     p.add_argument("--data", default="data/contrast/all-advice.jsonl")
+    p.add_argument("--template", default="plain", choices=["plain", "chat"])
     p.add_argument("--name", help="output basename (default: the data file's stem)")
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--dtype", default="bfloat16")
@@ -135,17 +120,21 @@ def main() -> None:
     out = jspace.model_dir(args.model) / "axes"
     out.mkdir(exist_ok=True)
 
-    model, _, _ = jspace.load_model(args.model, device=args.device, dtype=args.dtype)
-    print(f"{model} | {len(rows)} responses from {args.data}")
-    H = response_means(model, rows, args.max_seq_len)
+    model, _, tok = jspace.load_model(args.model, device=args.device, dtype=args.dtype)
+    print(f"{model} | {len(rows)} responses from {args.data} | {args.template} template")
+    H = response_means(model, tok, rows, args.template, args.max_seq_len)
     y = torch.tensor([int(r["label"]) for r in rows])
-    pair = torch.tensor([int(r.get("pair", i)) for i, r in enumerate(rows)])
+    pair = torch.tensor([int(r["pair"]) for r in rows])
     n_layers = model.n_layers
 
-    methods = build(model, H, y, args.model)
-    # Held-out scoring: directions from even pairs, separation on odd pairs.
+    # Lenses are optional: without them only diffmean is built.
+    base, contrast = (jspace.run_dir(args.model, t) / "lens.pt" for t in ("base", "contrast"))
+    J = JacobianLens.load(str(base)).jacobians if base.exists() else None
+    V = top_singular_vectors(JacobianLens.load(str(contrast)), n_layers, args.device) if contrast.exists() else None
+
+    methods = directions(H, y, J, V)
     train, test = pair % 2 == 0, pair % 2 == 1
-    held = build(model, H[train], y[train], args.model)
+    held = directions(H[train], y[train], J, V)
 
     report, stats = {}, {}
     for m, U in methods.items():
@@ -160,23 +149,15 @@ def main() -> None:
         print("          d' by layer: " + " ".join(f"{pl['d_prime']:.1f}" for pl in per_layer))
 
     names = list(methods)
-    cos = {
-        f"{a}/{b}": [(methods[a][l] @ methods[b][l]).item() for l in range(n_layers)]
-        for i, a in enumerate(names) for b in names[i + 1:]
-    }
+    cos = {f"{a}/{b}": (methods[a] * methods[b]).sum(1).tolist()
+           for i, a in enumerate(names) for b in names[i + 1:]}
     for k, v in cos.items():
         print(f"cos {k}: " + " ".join(f"{c:+.2f}" for c in v))
 
-    torch.save(
-        {"model": args.model, "data": args.data, "n_rows": len(rows),
-         "layers": list(range(n_layers)),
-         "u": methods, "stats": stats},
-        out / f"{name}.pt",
-    )
+    meta = {"model": args.model, "data": args.data, "template": args.template, "n_rows": len(rows)}
+    torch.save({**meta, "layers": list(range(n_layers)), "u": methods, "stats": stats}, out / f"{name}.pt")
     (out / f"{name}.json").write_text(json.dumps(
-        {"model": args.model, "data": args.data, "n_rows": len(rows),
-         "n_layers": n_layers, "separation": report, "cosine": cos}
-    ))
+        {**meta, "n_layers": n_layers, "separation": report, "cosine": cos}))
     print(f"wrote {out / name}.pt / .json")
 
 
