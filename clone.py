@@ -17,7 +17,7 @@ k = 0 is brute force with the same code, so both sit on one budget. The score
 is the open-weight one of the proposal: A_t = mean over the block of
 s_t = <u_l, h_t>, a time average like a heat wave; the event is the block mean
 over the whole response reaching a (default: the class midpoint s* of
-axes.py). The running max of s_t is kept too, so P[max_t s_t >= s*] comes out
+axes.py; several thresholds are scored on the same populations). The running max of s_t is kept too, so P[max_t s_t >= s*] comes out
 of the same population. Judge-based scores and the committor probe are not
 implemented.
 
@@ -128,7 +128,8 @@ def main() -> None:
     p.add_argument("--blocks", type=int, default=8)
     p.add_argument("--block-tokens", type=int, default=16)
     p.add_argument("--k", type=float, nargs="+", default=[0.0, 0.5], help="tilt strengths; 0 = brute force")
-    p.add_argument("--a", type=float, help="event: block-mean score >= a (default: class midpoint s*)")
+    p.add_argument("--a", type=float, nargs="+",
+                   help="event thresholds: block mean over the response >= a (default: the class midpoint s*)")
     p.add_argument("--repeats", type=int, default=4, help="independent runs per k (spread = error)")
     p.add_argument("--temperature", type=float, default=1.0)
     p.add_argument("--seed", type=int, default=0)
@@ -140,7 +141,7 @@ def main() -> None:
     U, st, d_prime, template = jspace.load_axes(args.model, args.axes, args.method)
     layer = args.layer if args.layer is not None else int(np.argmax(d_prime))
     s_star = (st["mu_safe"][layer] + st["mu_harm"][layer]) / 2
-    a = args.a if args.a is not None else s_star
+    A = args.a if args.a is not None else [s_star]
 
     model, hf, tok = jspace.load_model(args.model, device=args.device, dtype=args.dtype)
     prompt = jspace.prompts(jspace.load_jsonl(args.data), tok, template)[args.prompt]
@@ -148,7 +149,7 @@ def main() -> None:
     ids0 = model.encode(prompt)[0].cpu()
     step = llm_step(hf, tok, model, U[layer], layer, block_tokens=args.block_tokens,
                     temperature=args.temperature, eos=eos, pad=pad)
-    print(f"{model} | layer {layer} d'={d_prime[layer]:.2f} | s*={s_star:.2f} a={a:.2f} | "
+    print(f"{model} | layer {layer} d'={d_prime[layer]:.2f} | s*={s_star:.2f} a={A} | "
           f"N={args.walkers} L={args.blocks}x{args.block_tokens} tokens | prompt {args.prompt}")
 
     runs, samples = [], []
@@ -160,11 +161,12 @@ def main() -> None:
             init = [{"ids": ids0, "smax": -np.inf, "done": False, "last": 0.0} for _ in range(args.walkers)]
             res = gktl(init, step, k=k, n_blocks=args.blocks, rng=rng)
             smax = np.array([s["smax"] for s in res["states"]])
+            # One population, every threshold: the estimator only re-weights.
             runs.append({
                 "k": k, "repeat": r,
-                "p_mean": estimate(res, res["S"] >= a * args.blocks, k),
+                "p_mean": {str(a): estimate(res, res["S"] >= a * args.blocks, k) for a in A},
                 "p_max": estimate(res, smax >= s_star, k),
-                "frac_mean": float((res["S"] >= a * args.blocks).mean()),
+                "frac_mean": {str(a): float((res["S"] >= a * args.blocks).mean()) for a in A},
                 "frac_max": float((smax >= s_star).mean()),
                 "S_mean": float(res["S"].mean() / args.blocks),
                 "eos": float(np.mean([s["done"] for s in res["states"]])),
@@ -175,28 +177,31 @@ def main() -> None:
             samples.append({"k": k, "repeat": r, "S_over_L": float(res["S"][top] / args.blocks),
                             "text": tok.decode(res["states"][top]["ids"][len(ids0):].tolist(),
                                                skip_special_tokens=True)})
-            print(f"  k={k:<4} run {r}: p_mean={runs[-1]['p_mean']:.3e} p_max={runs[-1]['p_max']:.3e} "
-                  f"(raw {runs[-1]['frac_mean']:.2f}/{runs[-1]['frac_max']:.2f})  "
-                  f"<S/L>={runs[-1]['S_mean']:.2f}  parents>={runs[-1]['min_parent_frac']:.2f}  "
-                  f"eos={runs[-1]['eos']:.2f}  {runs[-1]['seconds']:.0f}s")
+            print(f"  k={k:<4} run {r}: " + "  ".join(
+                f"p[a>={a}]={runs[-1]['p_mean'][str(a)]:.3e} (raw {runs[-1]['frac_mean'][str(a)]:.2f})" for a in A)
+                + f"  <S/L>={runs[-1]['S_mean']:.2f}  parents>={runs[-1]['min_parent_frac']:.2f}  "
+                f"eos={runs[-1]['eos']:.2f}  {runs[-1]['seconds']:.0f}s")
     step.remove()
 
+    # p_max stays in the JSON only: it shares the time-average tilt, which is
+    # the wrong tilt for a max event, so it is only readable when k is small.
     summary = {}
     for k in args.k:
-        pm = np.array([r["p_mean"] for r in runs if r["k"] == k])
-        px = np.array([r["p_max"] for r in runs if r["k"] == k])
-        summary[str(k)] = {"p_mean": pm.mean(), "p_mean_std": pm.std(ddof=1) if len(pm) > 1 else None,
-                           "p_max": px.mean(), "p_max_std": px.std(ddof=1) if len(px) > 1 else None}
-        # p_max stays in the JSON only: it shares the time-average tilt, which is
-        # the wrong tilt for a max event, so it is only readable when k is small.
-        print(f"k={k}: P[mean >= a] = {pm.mean():.3e} ± {summary[str(k)]['p_mean_std']}")
+        mine = [r for r in runs if r["k"] == k]
+        sd = (lambda v: float(np.std(v, ddof=1))) if len(mine) > 1 else (lambda v: None)
+        summary[str(k)] = {"p_max": float(np.mean([r["p_max"] for r in mine])),
+                           "p_max_std": sd([r["p_max"] for r in mine])}
+        for a in A:
+            pm = [r["p_mean"][str(a)] for r in mine]
+            summary[str(k)][str(a)] = {"p_mean": float(np.mean(pm)), "p_mean_std": sd(pm)}
+            print(f"k={k} a={a}: P[mean >= a] = {np.mean(pm):.3e} ± {sd(pm)}")
 
     out = jspace.model_dir(args.model) / "clone"
     out.mkdir(exist_ok=True)
     name = args.name or f"{args.axes}-{args.method}-L{layer}-p{args.prompt}-T{args.temperature}"
     (out / f"{name}.json").write_text(json.dumps({
         "model": args.model, "axes": args.axes, "method": args.method, "template": template, "layer": layer,
-        "s_star": s_star, "a": a, "prompt": prompt, "temperature": args.temperature,
+        "s_star": s_star, "a": A, "prompt": prompt, "temperature": args.temperature,
         "walkers": args.walkers, "blocks": args.blocks, "block_tokens": args.block_tokens,
         "completions_per_run": args.walkers * args.blocks * args.block_tokens,
         "runs": runs, "summary": summary, "top_samples": samples,

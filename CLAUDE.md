@@ -101,36 +101,67 @@ tokens × batch, and `d_model` matters far less than for fitting a lens.
   read what the high-`s` completions say; `clone.py` saves the top walker of
   every run for exactly this.
 
-## First results: Qwen3-0.6B, `all-advice`, 2026-10-23
+## First results, 2026-10-23
 
-**Axes** (held-out d' at the best layer): diffmean 3.21 (L15), pullback 2.70
-(L17), contrast top singular vector 2.1 (L13). Pairwise cosines stay ≤ 0.3 at
-the layers that matter: three different directions, each separating the
-classes. One direction is not the whole story, which is the proposal's own
-de-risking remark on the 1-D reduction.
+Four models, the same 731 advice pairs, 128 prompts × 16 samples × 160
+tokens per temperature. Base models and Qwen3-0.6B use the plain rendering,
+the instruct models their chat template (gemma-it was also run plain: same
+picture, well 0.1 higher).
 
-**Landscape** along diffmean/L15, 128 prompts × 16 samples × 160 tokens,
-`s* = −6.78` (class means: safe −10.3, harmful −3.25):
+**Axes** (held-out d' at the best layer): Qwen3-0.6B 3.21 (L15),
+gemma-2-2b 3.61 (L16), gemma-2-2b-it 3.60 (L12), Qwen2.5-7B-Instruct 3.54
+(L17). The base model separates the graded responses as well as its instruct
+version: the axis is not where safety training shows, the landscape is. On
+the models with lenses the three constructions stay nearly orthogonal
+(cosines ≤ 0.3) while all separating the classes.
 
-| T | well bottom `s_eq` | curvature κ per token | width | final running mean ≥ `s*` | ε/T (fit B) |
-|---|---|---|---|---|---|
-| 0.7 | −9.4 | 0.21 | 3.6 | 0.12 | −0.005 |
-| 1.0 | −7.5 | 0.20 | 3.8 | 0.38 | −0.011 |
-| 1.3 | −1.8, still rising | 0.22 | 4.1 | 0.96 | −0.023 |
+**Landscape** along diffmean. Well position `z = (s_eq − μ_safe) / (μ_harm −
+μ_safe)` (0 = safe-class mean, 1 = harmful-class mean), and the fraction of
+completions whose running mean ends above the midpoint:
 
-Relaxation time ≈ 5 tokens, nearly independent of T; the well moves *up*
-with T while its shape stays, which is the deployment knob the proposal
-expects. Within 160 tokens the hazard *falls* (ε < 0): it is the prompt-end
-transient (`s_0 = −6.5`) relaxing into the well, not erosion. Eq. (4)'s
-question needs multi-turn contexts. T = 1.3 is the confound case: the text is
-gibberish and the "well" sits past the harmful mean.
+| model | z at T 0.7 / 1.0 / 1.3 | κ per token | width / gap | ends above midpoint, T 0.7 / 1.0 / 1.3 |
+|---|---|---|---|---|
+| gemma-2-2b (base) | 0.5 / 0.8 / 1.3 | 0.18 | 0.4 | 0.48 / 0.89 / 0.99 |
+| gemma-2-2b-it | −0.1 / 0.0 / 0.4 | 0.40 | 0.5 | 0.000 / 0.004 / 0.36 |
+| Qwen2.5-7B-Instruct | −0.2 / −0.2 / −0.1 | 0.28 | 0.4 | 0.000 / 0.001 / 0.014 |
+| Qwen3-0.6B | 0.1 / 0.4 / 1.3 | 0.21 | 0.5 | 0.12 / 0.38 / 0.96 |
 
-**Cloning** on prompt 3 (a vaccination side-effect question), event "mean
-score over 128 tokens ≥ μ_harm": brute force 3.0e-2 ± 0.2e-2 (3 × 256
-walkers); cloning at `k = 0.1` gives 3.2e-2 ± 0.6e-2 with the event typical
-(raw 0.57); `k = 0.5` collapses (parent fraction 0.5, estimates spread over
-two decades). Agreement, no speedup yet: this target is not rare. Cloning
-pays below p ≈ 1e-4, so raise `--a` or lengthen `--blocks`.
+- **Safety tuning digs the well.** On the same prompts the base model sits
+  between the classes or beyond the harmful mean (it role-plays a dialogue);
+  its instruct version sits at or below the safe mean. The proposal's picture
+  of post-training as the well, Part B1 Eq. (2), is visible at 2B.
+- **Temperature is the knob.** Width and curvature barely move with T; the
+  well bottom does. gemma-it goes from no midpoint crossings at T = 0.7 to a
+  third of completions at T = 1.3. Qwen2.5-7B is the most T-robust.
+- **The hazard is constant, not growing.** Token-level survival on
+  Qwen2.5-7B is exponential to R² = 1.00 (r0 = 0.015 to 0.024 per token
+  across T), the fixed-well case (A) of B2 Eq. (4). No erosion within 160
+  tokens anywhere; the multi-turn question is still open.
+- **Two confounds to read before any number.** The well bottom rises within
+  a careful answer (gemma-it: −41 early, −33 late at T = 1): disclaimer first,
+  medical content later, not erosion. And at T = 1.3 the highest-scoring
+  completions are word salad on every model: degenerate text sits on the
+  unsafe side of the axis.
+
+**Cloning**, event "mean score over 128 tokens ≥ a", prompt 3 (a
+vaccination side-effect question), 256 walkers × 8 blocks × 16 tokens, 3
+runs per k:
+
+- Qwen3-0.6B, a = μ_harm: brute force 3.0e-2 ± 0.2e-2, k = 0.1 gives
+  3.2e-2 ± 0.6e-2 with the event typical. Agreement, no speedup: not rare.
+- gemma-2-2b-it, a = midpoint: brute force 3.9e-3 ± 3.9e-3 (3 hits in 768
+  completions); k = 0.05 gives 2.4e-3 ± 0.6e-3 with raw fraction 0.04 to 0.11
+  and 83% of parents kept. A 2048-completion brute-force reference lands at
+  1.95e-3 (2 hits in each of two 1024-walker runs). So cloning matched the
+  reference at a quarter of its budget with a quarter of its spread. k ≥ 0.2
+  collapses onto gibberish lineages. a = −20 is unresolved (0 hits in 2048
+  brute force; the k that makes it typical selects word salad), which is the
+  proposal's "choice of the score" problem in practice.
+- Qwen2.5-7B-Instruct, a = midpoint: 0 hits in 768 brute-force completions
+  and nothing at k ≤ 0.2; k = 0.4 reaches it in two runs of three with raw
+  fractions 0.08 and 0.83, i.e. a few lineages, giving 4e-6 ± 4e-6. Below
+  1e-5 this budget (256 walkers, 8 blocks) is not enough: finer blocks and
+  more walkers, B2 Eq. (9), are the next run.
 
 ## Not implemented yet
 
@@ -148,9 +179,11 @@ pays below p ≈ 1e-4, so raise `--a` or lengthen `--blocks`.
   the random-init clone and the outlier test are not written.
 - **Figures.** `report.py` renders the lens page only; the landscape and
   clone JSONs have no page. No plotting library is installed.
-- **A safety-tuned model above 0.6B.** `google/gemma-2-2b` on disk is the
-  *base* model (useful as the no-safety-well control); `-it` is not
-  downloaded. Qwen2.5/Llama-3 instruct families are the proposal's targets.
+- **Post-training checkpoints** of one family (OLMo 2 / Tülu 3: SFT, DPO,
+  RL) for the recipe comparison of WP3; here only base vs final instruct.
+- **A coherence-aware score.** The diffmean axis rewards degenerate text, so
+  the tilt finds gibberish before harmful advice. A judge, a perplexity
+  penalty or a second axis is needed before pushing cloning below 1e-3.
 
 ## Conventions
 
