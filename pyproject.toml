@@ -1,0 +1,28 @@
+[project]
+name = "safety-landscape"
+version = "0.1.0"
+description = "Safety axes, landscapes and rare-event (cloning) estimates for open-weight LLMs — a TAILS testbed"
+requires-python = ">=3.11"
+dependencies = [
+    "jlens",
+    "torch>=2.6",
+    "transformers>=5.5",
+    "numpy",
+    "datasets",       # wikitext corpus for fitting
+    "safetensors",
+    "accelerate",     # device_map="auto" for multi-GPU
+]
+
+[dependency-groups]
+dev = ["ipykernel", "jupyter", "ruff", "pytest"]
+
+# Reference implementation from the paper; not on PyPI.
+[tool.uv.sources]
+jlens = { git = "https://github.com/anthropics/jacobian-lens.git" }
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501", "E741"]

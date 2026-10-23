@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# project
+runs/
+
+# the grant proposal is not ours to publish
+documents/

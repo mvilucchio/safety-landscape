@@ -1,0 +1,862 @@
+<title>J-space report — __MODEL__</title>
+<style>
+  :root {
+    color-scheme: light;
+    --plane:      #f9f9f7;
+    --surface:    #fcfcfb;
+    --ink:        #0b0b0b;
+    --ink-2:      #52514e;
+    --muted:      #898781;
+    --grid:       #e1e0d9;
+    --axis:       #c3c2b7;
+    --hairline:   rgba(11,11,11,0.10);
+    --accent:     #2a78d6;
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a;
+    --s4: #eda100; --s5: #e87ba4; --s6: #008300;
+    --seq-0: #cde2fb; --seq-1: #9ec5f4; --seq-2: #6da7ec;
+    --seq-3: #3987e5; --seq-4: #256abf; --seq-5: #184f95; --seq-6: #0d366b;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --plane: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7;
+      --muted: #898781; --grid: #2c2c2a; --axis: #383835;
+      --hairline: rgba(255,255,255,0.10); --accent: #3987e5;
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70;
+      --s4: #c98500; --s5: #d55181; --s6: #008300;
+      /* sequential ramp reverses on a dark ground: near-zero recedes into the
+         surface, so the darkest step is the low end here. */
+      --seq-0: #0d366b; --seq-1: #184f95; --seq-2: #256abf;
+      --seq-3: #3987e5; --seq-4: #6da7ec; --seq-5: #9ec5f4; --seq-6: #cde2fb;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --plane: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7;
+    --muted: #898781; --grid: #2c2c2a; --axis: #383835;
+    --hairline: rgba(255,255,255,0.10); --accent: #3987e5;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70;
+    --s4: #c98500; --s5: #d55181; --s6: #008300;
+    --seq-0: #0d366b; --seq-1: #184f95; --seq-2: #256abf;
+    --seq-3: #3987e5; --seq-4: #6da7ec; --seq-5: #9ec5f4; --seq-6: #cde2fb;
+  }
+
+  body {
+    background: var(--plane); color: var(--ink);
+    font-family: var(--sans); font-size: 15px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 40px 24px 96px; display: flex; flex-direction: column; gap: 48px; }
+
+  /* masthead */
+  .masthead { display: flex; flex-direction: column; gap: 20px; }
+  .kicker { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+  h1 { font-size: 32px; line-height: 1.15; font-weight: 600; letter-spacing: -.02em; text-wrap: balance; }
+  h1 .model { font-family: var(--mono); font-size: 26px; font-weight: 500; color: var(--accent); letter-spacing: -.01em; }
+  .lede { max-width: 64ch; color: var(--ink-2); }
+  code { font-family: var(--mono); font-size: .92em; }
+  .lede code { color: var(--ink); }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(126px, 1fr)); gap: 1px; background: var(--hairline); border: 1px solid var(--hairline); border-radius: 3px; overflow: hidden; }
+  .tile { background: var(--surface); padding: 14px 16px; display: flex; flex-direction: column; gap: 2px; }
+  .tile b { font-size: 22px; font-weight: 600; letter-spacing: -.01em; }
+  .tile span { font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+
+  section { display: flex; flex-direction: column; gap: 14px; border-top: 1px solid var(--hairline); padding-top: 28px; }
+  section[hidden] { display: none; }  /* author display:flex would beat the UA [hidden] rule */
+  h2 { font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
+  h3 { font-size: 13px; font-weight: 600; }
+  .note { max-width: 64ch; color: var(--ink-2); font-size: 14px; }
+  .panel { background: var(--surface); border: 1px solid var(--hairline); border-radius: 3px; padding: 18px; overflow-x: auto; }
+  .panel > .kicker { margin-bottom: 10px; }
+  .row { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; }
+  .row > .panel { flex: 1 1 300px; min-width: 0; }
+
+  /* controls */
+  .controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .controls .lbl { font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  button.k { font-family: var(--mono); font-size: 12px; padding: 4px 11px; border: 1px solid var(--hairline); border-radius: 999px; background: var(--surface); color: var(--ink-2); cursor: pointer; }
+  button.k[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.k:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  input[type=range] { flex: 1 1 260px; max-width: 420px; accent-color: var(--accent); }
+  input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  output.lbl { min-width: 3.5em; }
+
+  /* legend */
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12.5px; color: var(--ink-2); }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  .rampkey { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-2); font-family: var(--mono); }
+  .rampkey u { display: flex; text-decoration: none; }
+  .rampkey u b { width: 15px; height: 10px; display: block; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 7px 10px; border-bottom: 1px solid var(--grid); }
+  th:first-child, td:first-child { text-align: left; }
+  th { font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 400; }
+  td.name { font-family: var(--mono); font-size: 12.5px; }
+  td.name i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 8px; }
+  #modetable td, table.modes td { vertical-align: top; border-bottom: none; }
+  #modetable tr:nth-child(odd) td, table.modes tr:nth-child(odd) td { padding-top: 12px; }
+  #modetable tr:nth-child(even) td, table.modes tr:nth-child(even) td { border-bottom: 1px solid var(--grid); padding-bottom: 12px; }
+  td.sign { font-family: var(--mono); font-size: 15px; text-align: center; width: 1%; }
+  td.toks { text-align: left; }
+  .chip { font-family: var(--mono); font-size: 12px; background: var(--plane); border: 1px solid var(--hairline);
+          border-radius: 3px; padding: 2px 6px; margin: 0 4px 4px 0; display: inline-block; white-space: pre; }
+
+  svg { display: block; overflow: visible; }
+  svg text { font-family: var(--mono); font-size: 10px; fill: var(--muted); }
+  svg text.val { font-size: 11px; fill: var(--ink-2); }
+  .tip { position: fixed; z-index: 10; pointer-events: none; background: var(--surface); border: 1px solid var(--hairline); border-radius: 3px; padding: 7px 10px; font-family: var(--mono); font-size: 11.5px; line-height: 1.5; color: var(--ink); box-shadow: 0 4px 16px rgba(0,0,0,.13); opacity: 0; transition: opacity .1s; white-space: pre; }
+  @media (prefers-reduced-motion: reduce) { .tip { transition: none; } }
+  footer { border-top: 1px solid var(--hairline); padding-top: 20px; font-size: 13px; color: var(--muted); }
+  footer a { color: var(--accent); }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">Jacobian lens · J-space report</div>
+    <div class="controls" id="modelbar"></div>
+    <h1>Layer anatomy of <span class="model" id="model"></span></h1>
+    <p class="lede">
+      Each layer <code>l</code> gets an averaged Jacobian <code>J_l = E[∂h_final/∂h_l]</code>
+      that transports a residual into the final-layer basis, where the model's own unembedding
+      decodes it. A <b>contrast</b> lens replaces that average with a signed one —
+      <code>mean(J | +1) − mean(J | −1)</code> over labelled prompts — so it carries not what
+      an activation is disposed to say, but where in depth two classes disagree about it.
+      This report holds every lens fitted for this model, side by side.
+    </p>
+    <div class="tiles" id="tiles"></div>
+  </header>
+
+  <section>
+    <h2>Spectrum, layer by layer</h2>
+    <p class="note">
+      Every row is one layer's singular values, normalised by its own σ₀ and shown on a log
+      scale — so the row says how quickly that layer's transport falls off across directions.
+      A row that stays dark far to the right spreads its work over many directions; one that
+      fades immediately concentrates it in a few. Reading top to bottom gives the whole
+      network's profile at once.
+    </p>
+    <div class="row" id="spectrumgrid"></div>
+    <div class="rampkey" id="spectrumkey"></div>
+  </section>
+
+  <section>
+    <h2>The same spectra, overlaid</h2>
+    <p class="note">
+      The rows above drawn as curves, one per layer, shaded from shallow to deep. This is the
+      view that shows the <em>shape</em> of the decay and how it migrates with depth; the
+      heatmap is the one to read exact layers off.
+    </p>
+    <div class="row" id="overlaygrid"></div>
+    <div class="rampkey" id="overlaykey"></div>
+  </section>
+
+  <section>
+    <h2>One layer at a time</h2>
+    <p class="note">
+      The bars are a histogram of that layer's <em>whole</em> singular spectrum in log bins —
+      the bulk. The marks above it are the leading singular values kept exactly: where they
+      stand clear of the bulk, the layer has a few outlier directions doing work the rest
+      cannot, and those are the ones worth decoding.
+    </p>
+    <p class="note">
+      <code>J_l</code> is square — <code id="dsq"></code>, since it maps a residual to a
+      residual — so it also has an eigen-spectrum, plotted at right. That one is genuinely
+      complex: <code>J_l</code> is far from symmetric. The singular values on the left are
+      real for <em>any</em> matrix, square or not, being the square roots of the eigenvalues
+      of the positive semi-definite <code>J_lᵀ J_l</code> — their realness was never
+      evidence of squareness.
+    </p>
+    <div class="controls">
+      <span class="lbl">layer</span>
+      <input type="range" id="layerslider" min="0" step="1" aria-label="layer">
+      <output class="lbl" id="layerout"></output>
+    </div>
+    <div class="row" id="histgrid"></div>
+    <div class="row" id="eiggrid"></div>
+  </section>
+
+  <section>
+    <h2>How many directions each layer uses</h2>
+    <p class="note">
+      Effective rank — the participation ratio of the spectrum, out of <code id="dm"></code>
+      dimensions. One line per lens, so the contrast lens can be read directly against the
+      transport lens it was built from.
+    </p>
+    <div class="panel"><div id="effrank"></div></div>
+    <div class="legend" id="effranklegend"></div>
+  </section>
+
+  <section id="sec-contrast" hidden>
+    <h2>Where the two classes diverge</h2>
+    <p class="note">
+      Size of the difference relative to the positive-class lens, by depth. Read it against the
+      split-half line — shards hold disjoint pairs, so two independent estimates of the same
+      difference agreeing near zero means that layer is sampling noise, not contrast.
+    </p>
+    <div class="panel"><div id="contrastchart"></div></div>
+    <div class="legend" id="contrastlegend"></div>
+  </section>
+
+  <section id="sec-modes" hidden>
+    <h2>What the leading mode says</h2>
+    <p class="note">
+      Top singular direction of <code>J_diff</code> per layer, decoded through the model's
+      unembedding. <code>u₁</code> is the final-basis direction the classes most disagree
+      about; the two rows are its two signs, so <b>+</b> is what the positive class pushes
+      toward and <b>−</b> what the negative class does. Sign assignment within a layer is
+      meaningful; comparing signs <em>across</em> layers is not.
+    </p>
+    <div class="panel"><table id="modetable"></table></div>
+  </section>
+
+  <section id="sec-sae" hidden>
+    <h2>The same transport, read in an SAE feature basis</h2>
+    <p class="note">
+      Composing the lens with the sparse-autoencoder frames at both ends gives
+      <code>M_l = W_enc,targetᵀ · J_l · W_dec,lᵀ</code> — how much one unit of feature
+      <code>i</code> at layer <code>l</code> moves the pre-activation of feature <code>j</code>
+      at the target layer. It is the paper's readout with the SAE dictionary in place of
+      <code>W_U</code>.
+    </p>
+    <p class="note">
+      <b>The lift adds no rank.</b> <code>M</code> is <span id="saedims"></span> but factors
+      through <code>J</code>, so its rank cannot exceed <code>d_model</code>. The dictionary is
+      an overcomplete frame, not a bigger space — what its spectrum measures is <code>J</code>
+      in the SAE geometry. Below: effective rank of <code>M</code> against <code>J</code>'s own
+      for each lens, then the leading singular mode per layer — each side's top features named
+      by pushing their decoder direction through the unembedding, since the suites ship no
+      labels.
+    </p>
+    <div class="panel"><div id="saerank"></div></div>
+    <div class="legend" id="saelegend"></div>
+    <div id="saetable" style="display:flex;flex-direction:column;gap:18px"></div>
+  </section>
+
+  <section>
+    <h2>Layer similarity of the lens geometry</h2>
+    <p class="note">
+      Linear CKA between the J-lens vectors (rows of <code>W_U J_l</code>) of every layer pair.
+      For the transport lens, blocks along the diagonal are the paper's sensory → workspace →
+      motor split; for a contrast lens they are stretches of depth that separate the classes
+      the same way. Hover a cell; the layer highlights in every chart on the page.
+    </p>
+    <div class="row" id="ckagrid"></div>
+  </section>
+
+  <section>
+    <h2>What each J matrix does</h2>
+    <p class="note">
+      Transport gain and identity alignment by depth. For the transport lens, gain falls and
+      alignment rises — late layers approach a wide pass-through. A difference matrix
+      transports nothing, so its identity alignment sits near zero by construction.
+    </p>
+    <div class="row" id="profile"></div>
+    <div class="legend" id="profilelegend"></div>
+  </section>
+
+  <section id="sec-eval" hidden>
+    <h2>Where the lens finds the unspoken concept</h2>
+    <p class="note">
+      Six prompt sets from the paper, read out through the transport lens. Each item hides an
+      intermediate concept the prompt never states; the line is the fraction of those concepts
+      sitting at lens rank ≤ k at that layer. A hump in the middle of the network is the
+      workspace signature.
+    </p>
+    <div class="controls">
+      <span class="lbl">rank ≤</span>
+      <div id="kbtns"></div>
+    </div>
+    <div class="panel"><div id="evalchart"></div></div>
+    <div class="legend" id="evallegend"></div>
+    <div class="panel"><table id="evaltable"></table></div>
+  </section>
+
+  <footer>
+    Fitted with <a href="https://github.com/anthropics/jacobian-lens">jlens</a>, the reference
+    implementation for
+    <a href="https://transformer-circuits.pub/2026/workspace/index.html">Verbalizable Representations
+    Form a Global Workspace in Language Models</a>.
+    Regenerate with <code>uv run report.py --model &lt;id&gt; --tags base contrast</code>.
+  </footer>
+</div>
+<div class="tip" id="tip"></div>
+
+<script>
+const D = __DATA__;
+const NS = "http://www.w3.org/2000/svg";
+const SERIES = ["--s1", "--s2", "--s3", "--s4", "--s5", "--s6"];
+let MODEL, M, LENSES, TAGS;   // set per model by render()
+const tip = document.getElementById("tip");
+const listeners = [];   // layer-highlight subscribers, shared across every chart
+
+const el = (t, a = {}, p) => {
+  const n = document.createElementNS(NS, t);
+  for (const k in a) n.setAttribute(k, a[k]);
+  if (p) p.appendChild(n);
+  return n;
+};
+const div = (cls, html, p) => {
+  const n = document.createElement("div");
+  n.className = cls;
+  if (html) n.innerHTML = html;
+  if (p) p.appendChild(n);
+  return n;
+};
+
+function showTip(ev, text) {
+  tip.textContent = text;
+  tip.style.opacity = 1;
+  const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+  tip.style.left = Math.min(ev.clientX + pad, innerWidth - w - 8) + "px";
+  tip.style.top = Math.max(ev.clientY - h - pad, 8) + "px";
+}
+const hideTip = () => { tip.style.opacity = 0; };
+const setLayer = l => listeners.forEach(f => f(l));
+
+/* ---------------------------------------------------------------------- */
+/* Everything below is redrawn per model. Hosts are emptied and the shared  */
+/* layer-highlight subscriber list reset, so switching never stacks state.  */
+/* ---------------------------------------------------------------------- */
+const HOSTS = ["tiles", "spectrumgrid", "spectrumkey", "overlaygrid", "overlaykey",
+               "histgrid", "eiggrid", "effrank", "effranklegend", "contrastchart",
+               "contrastlegend", "modetable", "ckagrid", "profile", "profilelegend",
+               "kbtns", "evalchart", "evallegend", "evaltable", "saerank", "saelegend",
+               "saetable"];
+const SECTIONS = ["sec-contrast", "sec-modes", "sec-eval", "sec-sae"];
+
+function render(modelId) {
+  MODEL = modelId;
+  M = D.models[modelId];
+  LENSES = M.lenses;
+  TAGS = Object.keys(LENSES);
+  listeners.length = 0;
+  hideTip();
+  for (const id of HOSTS) { const n = document.getElementById(id); if (n) n.innerHTML = ""; }
+  for (const id of SECTIONS) document.getElementById(id).hidden = true;
+
+  /* ---- masthead ------------------------------------------------------ */
+  document.getElementById("model").textContent = MODEL;
+  document.getElementById("dm").textContent = M.d_model;
+
+  const tiles = [[M.n_layers, "layers"], [M.d_model, "d_model"]];
+  for (const t of TAGS) tiles.push([LENSES[t].n_prompts, t + " prompts"]);
+  const contrastTag = TAGS.find(t => LENSES[t].contrast);
+  if (contrastTag) {
+    const c = LENSES[contrastTag].contrast, L = LENSES[contrastTag].layers;
+    tiles.push(["L" + L[c.rel_to_pos.indexOf(Math.max(...c.rel_to_pos))], "peak contrast"]);
+  }
+  document.getElementById("tiles").innerHTML = tiles
+    .map(([v, k]) => `<div class="tile"><b>${v}</b><span>${k}</span></div>`).join("");
+
+  /* ---- spectrum heatmap: layers x singular-value index ----------------- */
+  // One shared log scale across every lens, so the panels are comparable. Each
+  // row is already normalised by its own sigma_0, so colour means "how far down
+  // the spectrum has fallen by index k", not raw magnitude.
+  // Spectra run all the way to zero, so the log scale needs a floor: three decades
+  // below sigma_0 is well past anything that carries rank.
+  const SV_FLOOR = 1e-3;
+  const svFloor = Math.log10(SV_FLOOR);
+  const svStep = v => {
+    const x = (Math.log10(Math.max(v, SV_FLOOR)) - svFloor) / (0 - svFloor);
+    return Math.max(0, Math.min(6, Math.round(x * 6)));
+  };
+
+  function spectrumHeatmap(host, tag) {
+    const lens = LENSES[tag], sv = lens.sv, layers = lens.layers, idx = lens.sv_index;
+    const nCol = sv[0].length, nRow = sv.length;
+    const cell = { w: 3, h: 12 }, pad = { l: 30, t: 6, b: 30, r: 6 };
+    const panel = div("panel", `<div class="kicker">${tag}</div>`, host);
+    const svg = el("svg", { width: pad.l + nCol * cell.w + pad.r,
+                            height: pad.t + nRow * cell.h + pad.b }, panel);
+    const g = el("g", { transform: `translate(${pad.l},${pad.t})` }, svg);
+
+    for (let i = 0; i < nRow; i++) for (let j = 0; j < nCol; j++) {
+      const v = sv[i][j];
+      const rect = el("rect", { x: j * cell.w, y: i * cell.h,
+                                width: cell.w, height: cell.h - 1,
+                                style: `fill:var(--seq-${svStep(v)})` }, g);
+      rect.addEventListener("pointerenter", ev => {
+        showTip(ev, `${tag}  L${layers[i]}\nσ[${idx[j]}]/σ₀ = ${v.toExponential(2)}`);
+        setLayer(layers[i]);
+      });
+      rect.addEventListener("pointermove", ev => showTip(ev, tip.textContent));
+    }
+    g.addEventListener("pointerleave", () => { hideTip(); setLayer(null); });
+
+    const rowTick = Math.max(1, Math.round(nRow / 9));
+    for (let i = 0; i < nRow; i += rowTick)
+      el("text", { x: -7, y: i * cell.h + cell.h - 2, "text-anchor": "end" }, g)
+        .textContent = layers[i];
+    // Columns are log-spaced, so label them with the index each one actually is.
+    for (const want of [0, 10, 32, 100, 320, idx[idx.length - 1]]) {
+      const j = idx.findIndex(v => v >= want);
+      if (j < 0) continue;
+      el("text", { x: j * cell.w + cell.w / 2, y: nRow * cell.h + 14, "text-anchor": "middle" }, g)
+        .textContent = idx[j];
+    }
+    el("text", { x: nCol * cell.w / 2, y: nRow * cell.h + 27, "text-anchor": "middle" }, g)
+      .textContent = "singular value index (log spaced)";
+    el("text", { x: -pad.l + 2, y: -1, "text-anchor": "start" }, g).textContent = "layer";
+
+    const band = el("rect", { style: "fill:none;stroke:var(--ink)", "stroke-width": 1.5, opacity: 0,
+                              x: -1, width: nCol * cell.w + 2, height: cell.h }, g);
+    listeners.push(l => {
+      const i = layers.indexOf(l);
+      if (i < 0) { band.setAttribute("opacity", 0); return; }
+      band.setAttribute("opacity", .9);
+      band.setAttribute("y", i * cell.h - 1);
+    });
+  }
+  TAGS.forEach(t => spectrumHeatmap(document.getElementById("spectrumgrid"), t));
+  document.getElementById("spectrumkey").innerHTML =
+    `<span>σₖ/σ₀</span><span>${Math.pow(10, svFloor).toExponential(0)}</span>` +
+    `<u>${[0, 1, 2, 3, 4, 5, 6].map(i => `<b style="background:var(--seq-${i})"></b>`).join("")}</u>` +
+    `<span>1</span>`;
+
+  /* ---- generic line chart -------------------------------------------- */
+  function lineChart(host, opts) {
+    const { series, x, w = 320, h = 170, log = false, yMax, yMin, fmt = v => v.toFixed(2),
+            xLabel = "layer", label = false, track = true, thin = false } = opts;
+    const pad = { l: 46, t: 10, r: label ? 96 : 12, b: 42 };
+    const svg = el("svg", { viewBox: `0 0 ${w} ${h}`, style: "width:100%;height:auto" }, host);
+    const iw = w - pad.l - pad.r, ih = h - pad.t - pad.b;
+    const flat = series.flatMap(s => s.y);
+    const tf = v => (log ? Math.log10(Math.max(v, 1e-12)) : v);
+    const hi = tf(yMax ?? Math.max(...flat)), lo = tf(yMin ?? (log ? Math.min(...flat) : Math.min(0, ...flat)));
+    const X = i => pad.l + (x.length < 2 ? iw / 2 : (i / (x.length - 1)) * iw);
+    // Clamped to the plot area: a spectrum that falls below the floor must sit on
+    // the axis, not draw outside the panel (svg overflow is visible here).
+    const Y = v => Math.max(pad.t, Math.min(pad.t + ih,
+                   pad.t + ih - ((tf(v) - lo) / ((hi - lo) || 1)) * ih));
+
+    for (let t = 0; t <= 4; t++) {
+      const v = lo + (hi - lo) * t / 4, y = pad.t + ih - (t / 4) * ih;
+      el("line", { x1: pad.l, x2: pad.l + iw, y1: y, y2: y, style: "stroke:var(--grid)", "stroke-width": 1 }, svg);
+      el("text", { x: pad.l - 8, y: y + 3.5, "text-anchor": "end" }, svg).textContent =
+        fmt(log ? Math.pow(10, v) : v);
+    }
+    el("line", { x1: pad.l, x2: pad.l + iw, y1: pad.t + ih, y2: pad.t + ih, style: "stroke:var(--axis)", "stroke-width": 1 }, svg);
+    const step = Math.max(1, Math.round(x.length / 7));
+    for (let i = 0; i < x.length; i += step)
+      el("text", { x: X(i), y: pad.t + ih + 16, "text-anchor": "middle" }, svg).textContent = x[i];
+    el("text", { x: pad.l + iw / 2, y: pad.t + ih + 34, "text-anchor": "middle" }, svg).textContent = xLabel;
+
+    // Colours go in as var() so the viewer's theme toggle repaints them; a hex
+    // resolved at draw time would freeze the chart in whichever theme loaded first.
+    series.forEach(s => {
+      el("path", { d: s.y.map((v, i) => (i ? "L" : "M") + X(i) + " " + Y(v)).join(" "),
+                   style: `fill:none;stroke:var(${s.color})`, "stroke-width": thin ? 1.25 : 2,
+                   "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+      if (thin) return;
+      const last = s.y.length - 1;
+      el("circle", { cx: X(last), cy: Y(s.y[last]), r: 3.5,
+                     style: `fill:var(${s.color});stroke:var(--surface)`, "stroke-width": 2 }, svg);
+    });
+
+    // Direct labels at the line ends — identity never rests on hue alone. Series
+    // that finish close together would overprint, so push them apart in y.
+    if (label) {
+      const last = x.length - 1;
+      const slots = series.map((s, i) => ({ s, y: Y(s.y[last]), i })).sort((a, b) => a.y - b.y);
+      const GAP = 13;
+      for (let i = 1; i < slots.length; i++)
+        slots[i].y = Math.max(slots[i].y, slots[i - 1].y + GAP);
+      const over = slots.length ? slots[slots.length - 1].y - (pad.t + ih) : 0;
+      if (over > 0) slots.forEach(o => { o.y -= over; });
+      for (const o of slots) {
+        const y0 = Y(o.s.y[last]);
+        if (Math.abs(o.y - y0) > 2)  // leader line back to the point it labels
+          el("path", { d: `M${X(last) + 4} ${y0} L${X(last) + 9} ${o.y - 3.5}`,
+                       style: `fill:none;stroke:var(${o.s.color})`, "stroke-width": 1, opacity: .5 }, svg);
+        el("text", { x: X(last) + 11, y: o.y, style: `fill:var(${o.s.color})`, class: "val" },
+           svg).textContent = o.s.name;
+      }
+    }
+
+    if (!track) return svg;
+    const rule = el("line", { y1: pad.t, y2: pad.t + ih, style: "stroke:var(--ink)", "stroke-width": 1, opacity: 0 }, svg);
+    listeners.push(l => {
+      const i = x.indexOf(l);
+      if (i < 0) { rule.setAttribute("opacity", 0); return; }
+      rule.setAttribute("opacity", .35);
+      rule.setAttribute("x1", X(i)); rule.setAttribute("x2", X(i));
+    });
+    const hit = el("rect", { x: pad.l, y: pad.t, width: iw, height: ih, fill: "transparent" }, svg);
+    hit.addEventListener("pointermove", ev => {
+      const b = svg.getBoundingClientRect();
+      const sx = (ev.clientX - b.left) / b.width * w;   // client px -> viewBox units
+      const i = Math.round((sx - pad.l) / iw * (x.length - 1));
+      const j = Math.max(0, Math.min(x.length - 1, i));
+      setLayer(x[j]);
+      showTip(ev, `layer ${x[j]}\n` + series.map(s => `${s.name.padEnd(14)} ${fmt(s.y[j])}`).join("\n"));
+    });
+    hit.addEventListener("pointerleave", () => { hideTip(); setLayer(null); });
+    return svg;
+  }
+
+  /* ---- overlaid spectra, one curve per layer --------------------------- */
+  // Layer is an ordered quantity, so it gets the sequential ramp, not categorical
+  // hues: 27 categorical series would be unreadable and would imply identity.
+  const svMin = SV_FLOOR;   // shared across panels, or the two are not comparable
+  function spectrumOverlay(host, tag) {
+    const lens = LENSES[tag], sv = lens.sv, layers = lens.layers;
+    const panel = div("panel", `<div class="kicker">${tag}</div>`, host);
+    lineChart(panel, {
+      // x carries the real indices; they are log-spaced, so equal steps along the
+      // axis are equal ratios — a log-log spectrum plot.
+      x: lens.sv_index, w: 480, h: 260, log: true, track: false, thin: true,
+      yMin: svMin, yMax: 1,
+      xLabel: "singular value index (log spaced)",
+      fmt: v => v >= 0.1 ? v.toFixed(2) : v.toExponential(0),
+      series: sv.map((y, i) => ({
+        name: "L" + layers[i], y,
+        color: `--seq-${Math.round(i / Math.max(1, sv.length - 1) * 6)}`,
+      })),
+    });
+  }
+  TAGS.forEach(t => spectrumOverlay(document.getElementById("overlaygrid"), t));
+  document.getElementById("overlaykey").innerHTML =
+    `<span>layer</span><span>0</span>` +
+    `<u>${[0, 1, 2, 3, 4, 5, 6].map(i => `<b style="background:var(--seq-${i})"></b>`).join("")}</u>` +
+    `<span>${M.n_layers - 2}</span>`;
+
+  /* ---- one layer at a time: spectrum histogram + eigenvalues ------------ */
+  document.getElementById("dsq").textContent = `${M.d_model} × ${M.d_model}`;
+
+  function histChart(host, tag, li) {
+    const lens = LENSES[tag];
+    const counts = lens.sv_hist[li], top = lens.sv_top[li];
+    const [lo, hi] = lens.sv_log_range, nb = counts.length;
+    const w = 480, h = 240, pad = { l: 46, t: 34, r: 12, b: 42 };
+    host.innerHTML = "";
+    const svg = el("svg", { viewBox: `0 0 ${w} ${h}`, style: "width:100%;height:auto" }, host);
+    const iw = w - pad.l - pad.r, ih = h - pad.t - pad.b;
+    const maxC = Math.max(...counts, 1);
+    const X = v => pad.l + (Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo) * iw;
+    const Y = c => pad.t + ih - (c / maxC) * ih;
+
+    for (let t = 0; t <= 4; t++) {
+      const y = pad.t + ih - (t / 4) * ih;
+      el("line", { x1: pad.l, x2: pad.l + iw, y1: y, y2: y, style: "stroke:var(--grid)", "stroke-width": 1 }, svg);
+      el("text", { x: pad.l - 8, y: y + 3.5, "text-anchor": "end" }, svg).textContent =
+        Math.round(maxC * t / 4);
+    }
+    const bw = iw / nb;
+    counts.forEach((c, i) => {
+      if (!c) return;
+      const rect = el("rect", { x: pad.l + i * bw + 1, y: Y(c), width: Math.max(1, bw - 2),
+                                height: pad.t + ih - Y(c), style: "fill:var(--s1)", rx: 1 }, svg);
+      const b0 = lo + (hi - lo) * i / nb, b1 = lo + (hi - lo) * (i + 1) / nb;
+      rect.addEventListener("pointerenter", ev => showTip(ev,
+        `${Math.pow(10, b0).toExponential(1)} – ${Math.pow(10, b1).toExponential(1)}\n${c} singular values`));
+      rect.addEventListener("pointermove", ev => showTip(ev, tip.textContent));
+      rect.addEventListener("pointerleave", hideTip);
+    });
+
+    // The leading values, drawn exactly rather than binned: a spike standing to
+    // the right of where the bulk ends is an outlier direction.
+    top.forEach((v, k) => {
+      if (v <= 0) return;
+      const x = X(Math.log10(v));
+      el("line", { x1: x, x2: x, y1: pad.t - 12, y2: pad.t + ih,
+                   style: "stroke:var(--s2)", "stroke-width": k === 0 ? 2 : 1,
+                   opacity: k === 0 ? 1 : Math.max(0.28, 1 - k / top.length) }, svg);
+    });
+    el("text", { x: X(Math.log10(top[0])), y: pad.t - 17, "text-anchor": "end",
+                 style: "fill:var(--s2)", class: "val" }, svg).textContent = "σ₀ ";
+    el("text", { x: X(Math.log10(top[top.length - 1])), y: pad.t - 17, "text-anchor": "start",
+                 style: "fill:var(--s2)", class: "val" }, svg).textContent = ` σ${top.length - 1}`;
+
+    el("line", { x1: pad.l, x2: pad.l + iw, y1: pad.t + ih, y2: pad.t + ih, style: "stroke:var(--axis)", "stroke-width": 1 }, svg);
+    for (let t = 0; t <= 4; t++) {
+      const v = lo + (hi - lo) * t / 4;
+      el("text", { x: pad.l + (t / 4) * iw, y: pad.t + ih + 16, "text-anchor": "middle" }, svg)
+        .textContent = v === 0 ? "1" : "1e" + v;
+    }
+    el("text", { x: pad.l + iw / 2, y: pad.t + ih + 34, "text-anchor": "middle" }, svg)
+      .textContent = "σₖ / σ₀   (count per log bin)";
+  }
+
+  function eigChart(host, tag, li) {
+    const lens = LENSES[tag], ev = lens.eig[li];
+    const w = 480, h = 300, pad = { l: 46, t: 12, r: 16, b: 44 };
+    host.innerHTML = "";
+    if (!ev || !ev.length) { host.textContent = "no eigenvalues — re-run analyze.py"; return; }
+    const svg = el("svg", { viewBox: `0 0 ${w} ${h}`, style: "width:100%;height:auto" }, host);
+    const iw = w - pad.l - pad.r, ih = h - pad.t - pad.b;
+    const R = 1.05;                                   // everything is /max|lambda|
+    // Equal scale on both axes, or the complex plane is sheared and the unit
+    // circle stops meaning |lambda| = 1.
+    const s = Math.min(iw, ih) / (2 * R);
+    const cx = pad.l + iw / 2, cy = pad.t + ih / 2;
+    const X = re => cx + re * s;
+    const Y = im => cy - im * s;
+
+    el("circle", { cx, cy, r: s, style: "fill:none;stroke:var(--grid)",
+                   "stroke-width": 1, "stroke-dasharray": "3 3" }, svg);
+    el("line", { x1: X(-R), x2: X(R), y1: Y(0), y2: Y(0), style: "stroke:var(--axis)", "stroke-width": 1 }, svg);
+    el("line", { x1: X(0), x2: X(0), y1: Y(R), y2: Y(-R), style: "stroke:var(--axis)", "stroke-width": 1 }, svg);
+
+    ev.forEach(([re, im], k) => {
+      const c = el("circle", { cx: X(re), cy: Y(im), r: k === 0 ? 4 : 2.6,
+                               style: `fill:var(--s${k === 0 ? 2 : 1})`,
+                               opacity: k === 0 ? 1 : 0.55 }, svg);
+      c.addEventListener("pointerenter", ev2 => showTip(ev2,
+        `λ${k} / |λ|max\n${re.toFixed(3)} ${im < 0 ? "−" : "+"} ${Math.abs(im).toFixed(3)}i`));
+      c.addEventListener("pointermove", ev2 => showTip(ev2, tip.textContent));
+      c.addEventListener("pointerleave", hideTip);
+    });
+    for (const t of [-1, -0.5, 0.5, 1]) {
+      el("text", { x: X(t), y: Y(-R) + 14, "text-anchor": "middle" }, svg).textContent = t;
+      el("text", { x: X(0) - 7, y: Y(t) + 3.5, "text-anchor": "end" }, svg).textContent = t;
+    }
+    el("text", { x: pad.l + iw / 2, y: pad.t + ih + 34, "text-anchor": "middle" }, svg)
+      .textContent = `Re(λ) / |λ|max — dashed circle |λ| = |λ|max = ${lens.eig_absmax[li].toPrecision(3)}`;
+    el("text", { x: X(0) + 6, y: Y(R) + 9, "text-anchor": "start" }, svg).textContent = "Im(λ)";
+  }
+
+  const LAYERS = LENSES[TAGS[0]].layers;
+  const slider = document.getElementById("layerslider");
+  slider.max = LAYERS.length - 1;
+  slider.value = Math.floor(LAYERS.length / 2);
+
+  const histHosts = {}, eigHosts = {};
+  for (const t of TAGS) {
+    histHosts[t] = div("", "", div("panel", `<div class="kicker">${t} · singular values</div>`,
+                                   document.getElementById("histgrid")));
+    eigHosts[t] = div("", "", div("panel", `<div class="kicker">${t} · eigenvalues</div>`,
+                                  document.getElementById("eiggrid")));
+  }
+  function drawLayerPanels(li) {
+    document.getElementById("layerout").textContent = "L" + LAYERS[li];
+    for (const t of TAGS) { histChart(histHosts[t], t, li); eigChart(eigHosts[t], t, li); }
+  }
+  slider.addEventListener("input", () => drawLayerPanels(+slider.value));
+  // Hovering any layer elsewhere on the page drives this section too.
+  listeners.push(l => {
+    const i = LAYERS.indexOf(l);
+    if (i < 0 || +slider.value === i) return;
+    slider.value = i;
+    drawLayerPanels(i);
+  });
+  drawLayerPanels(+slider.value);
+
+  /* ---- effective rank, lenses compared --------------------------------- */
+  lineChart(document.getElementById("effrank"), {
+    x: LENSES[TAGS[0]].layers, w: 900, h: 280, label: true, yMin: 0,
+    fmt: v => v.toFixed(0),
+    series: TAGS.map((t, i) => ({ name: t, y: LENSES[t].profile.eff_rank, color: SERIES[i % 6] })),
+  });
+  document.getElementById("effranklegend").innerHTML = TAGS
+    .map((t, i) => `<span><i style="background:var(${SERIES[i % 6]})"></i>${t}</span>`).join("");
+
+  /* ---- contrast-only sections ------------------------------------------ */
+  if (contrastTag) {
+    const lens = LENSES[contrastTag], C = lens.contrast;
+    document.getElementById("sec-contrast").hidden = false;
+    document.getElementById("sec-modes").hidden = false;
+
+    lineChart(document.getElementById("contrastchart"), {
+      x: lens.layers, w: 900, h: 280, label: true, yMin: 0, track: false,
+      series: [
+        { name: "‖diff‖/‖pos‖", y: C.rel_to_pos, color: "--s1" },
+        { name: "split-half", y: C.agreement, color: "--s2" },
+        { name: "top-4 energy", y: C.top4_energy, color: "--s3" },
+      ],
+    });
+    document.getElementById("contrastlegend").innerHTML =
+      `<span><i style="background:var(--s1)"></i>‖J_diff‖ / ‖J_pos‖ — size of the contrast</span>` +
+      `<span><i style="background:var(--s2)"></i>split-half agreement — 0 is noise</span>` +
+      `<span><i style="background:var(--s3)"></i>fraction of the difference in its top 4 directions</span>`;
+
+    const esc = t => t.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    const chips = ts => ts.map(t => `<code class="chip">${esc(t)}</code>`).join("");
+    document.getElementById("modetable").innerHTML =
+      `<tr><th>layer</th><th>mode share</th><th>sign</th><th>top tokens</th></tr>` +
+      C.modes.map(m =>
+        `<tr><td class="name" rowspan="2">L${m.layer}</td>` +
+        `<td rowspan="2">${(m.share * 100).toFixed(0)}%</td>` +
+        `<td class="sign">+</td><td class="toks">${chips(m.pos)}</td></tr>` +
+        `<tr><td class="sign">−</td><td class="toks">${chips(m.neg)}</td></tr>`
+      ).join("");
+  }
+
+  /* ---- CKA matrices, one per lens -------------------------------------- */
+  function ckaMatrix(host, tag) {
+    const lens = LENSES[tag], cka = lens.cka, layers = lens.layers;
+    const panel = div("panel", `<div class="kicker">${tag}</div>`, host);
+    if (!cka.length) { panel.append("no gram.pt — re-run fit.py to enable CKA"); return; }
+    const n = cka.length, cell = Math.max(8, Math.min(13, Math.floor(380 / n)));
+    const pad = { l: 30, t: 6, b: 30, r: 66 };
+    const svg = el("svg", { width: pad.l + n * cell + pad.r, height: pad.t + n * cell + pad.b }, panel);
+    // Rescale from the observed floor: CKA between deep layers of one model never
+    // reaches 0, so a 0–1 ramp would wash the whole matrix into one blue.
+    let lo = 1; for (const r of cka) for (const v of r) lo = Math.min(lo, v);
+    const step = v => Math.max(0, Math.min(6, Math.round((v - lo) / ((1 - lo) || 1) * 6)));
+
+    const g = el("g", { transform: `translate(${pad.l},${pad.t})` }, svg);
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+      const rect = el("rect", { x: j * cell, y: i * cell, width: cell - 1, height: cell - 1,
+                                style: `fill:var(--seq-${step(cka[i][j])})`, rx: 1 }, g);
+      rect.addEventListener("pointerenter", ev => {
+        showTip(ev, `${tag}\nL${layers[i]} ↔ L${layers[j]}\nCKA ${cka[i][j].toFixed(3)}`);
+        setLayer(layers[i]);
+      });
+      rect.addEventListener("pointermove", ev => showTip(ev, tip.textContent));
+    }
+    g.addEventListener("pointerleave", () => { hideTip(); setLayer(null); });
+
+    const tick = Math.max(1, Math.round(n / 8));
+    for (let i = 0; i < n; i += tick) {
+      el("text", { x: -7, y: i * cell + cell / 2 + 3, "text-anchor": "end" }, g).textContent = layers[i];
+      el("text", { x: i * cell + cell / 2, y: n * cell + 14, "text-anchor": "middle" }, g).textContent = layers[i];
+    }
+    el("text", { x: n * cell / 2, y: n * cell + 27, "text-anchor": "middle" }, g).textContent = "source layer";
+
+    const cross = el("rect", { style: "fill:none;stroke:var(--ink)", "stroke-width": 1.5, opacity: 0,
+                               x: -1, width: n * cell }, g);
+    listeners.push(l => {
+      const i = layers.indexOf(l);
+      if (i < 0) { cross.setAttribute("opacity", 0); return; }
+      cross.setAttribute("opacity", .85);
+      cross.setAttribute("y", i * cell - 1); cross.setAttribute("height", cell);
+    });
+
+    const cb = el("g", { transform: `translate(${pad.l + n * cell + 20},0)` }, svg);
+    for (let i = 0; i <= 6; i++)
+      el("rect", { x: 0, y: (6 - i) * 14, width: 12, height: 14, style: `fill:var(--seq-${i})` }, cb);
+    el("text", { x: 17, y: 10 }, cb).textContent = "1.00";
+    el("text", { x: 17, y: 96 }, cb).textContent = lo.toFixed(2);
+  }
+  TAGS.forEach(t => ckaMatrix(document.getElementById("ckagrid"), t));
+
+  /* ---- layer profile, lenses compared ---------------------------------- */
+  const PROFILE = [
+    ["fro", "Transport gain ‖J‖ᶠ/√d", v => v.toFixed(2)],
+    ["identity_cos", "Identity alignment", v => v.toFixed(3)],
+    ["stable_rank", "Stable rank", v => v.toFixed(0)],
+  ];
+  for (const [key, title, fmt] of PROFILE) {
+    const panel = div("panel", `<div class="kicker">${title}</div>`,
+                      document.getElementById("profile"));
+    lineChart(panel, {
+      x: LENSES[TAGS[0]].layers, fmt, w: 320,
+      series: TAGS.map((t, i) => ({ name: t, y: LENSES[t].profile[key], color: SERIES[i % 6] })),
+    });
+  }
+  document.getElementById("profilelegend").innerHTML = TAGS
+    .map((t, i) => `<span><i style="background:var(${SERIES[i % 6]})"></i>${t}</span>`).join("");
+
+  /* ---- evaluations (whichever lens has them) --------------------------- */
+  const evalTag = TAGS.find(t => Object.keys(LENSES[t].evals).length);
+  if (evalTag) {
+    document.getElementById("sec-eval").hidden = false;
+    const lens = LENSES[evalTag], E = lens.evals;
+    const names = Object.keys(E);
+    const KS = Object.keys(E[names[0]].per_layer_frac);
+    let curK = KS.includes("10") ? "10" : KS[0];
+    const base = listeners.length;   // eval redraws must not stack listeners
+
+    const draw = () => {
+      const host = document.getElementById("evalchart");
+      host.innerHTML = "";
+      while (listeners.length > base) listeners.pop();
+      lineChart(host, {
+        x: lens.layers, w: 900, h: 300, label: true, yMin: 0,
+        fmt: v => (v * 100).toFixed(0) + "%",
+        series: names.map((n, i) => ({ name: n, y: E[n].per_layer_frac[curK], color: SERIES[i % 6] })),
+      });
+    };
+    document.getElementById("kbtns").innerHTML = KS
+      .map(k => `<button class="k" data-k="${k}" aria-pressed="${k === curK}">${k}</button>`).join(" ");
+    document.getElementById("kbtns").addEventListener("click", ev => {
+      const b = ev.target.closest("button"); if (!b) return;
+      curK = b.dataset.k;
+      document.querySelectorAll("#kbtns button").forEach(x => x.setAttribute("aria-pressed", x.dataset.k === curK));
+      draw();
+    });
+    draw();
+    document.getElementById("evallegend").innerHTML = names
+      .map((n, i) => `<span><i style="background:var(${SERIES[i % 6]})"></i>${n}</span>`).join("");
+
+    const ks = Object.keys(E[names[0]].pass_at_k);
+    document.getElementById("evaltable").innerHTML =
+      `<tr><th>prompt set</th><th>items</th><th>targets</th>` +
+      ks.map(k => `<th>pass@${k}</th>`).join("") + `<th>best layer</th></tr>` +
+      names.map((n, i) => {
+        const e = E[n], m = e.median_rank_per_layer;
+        return `<tr><td class="name"><i style="background:var(${SERIES[i % 6]})"></i>${n}</td>` +
+          `<td>${e.n_items}</td><td>${e.n_targets}</td>` +
+          ks.map(k => `<td>${(e.pass_at_k[k] * 100).toFixed(0)}%</td>`).join("") +
+          `<td>L${lens.layers[m.indexOf(Math.min(...m))]}</td></tr>`;
+      }).join("");
+  }
+
+  /* ---- the same transport in an SAE feature basis ---------------------- */
+  const saeTags = TAGS.filter(t => LENSES[t].sae);
+  if (saeTags.length) {
+    const S0 = LENSES[saeTags[0]].sae;
+    document.getElementById("sec-sae").hidden = false;
+    document.getElementById("saedims").textContent =
+      `${S0.n_features} × ${S0.n_features}, from a ${S0.n_features / M.d_model}× dictionary`;
+
+    // One M/J pair per lens that has an SAE map, so a contrast lens can be read
+    // against its own transport rather than against the other lens'.
+    const series = [];
+    saeTags.forEach((t, i) => {
+      const S = LENSES[t].sae, n = S.layers.length;
+      series.push({ name: `M · ${t}`, y: S.eff_rank, color: SERIES[(2 * i + 2) % 6] });
+      series.push({ name: `J · ${t}`, y: LENSES[t].profile.eff_rank.slice(0, n), color: SERIES[(2 * i) % 6] });
+    });
+    lineChart(document.getElementById("saerank"), {
+      x: S0.layers, w: 900, h: 300, label: true, yMin: 0, yMax: M.d_model,
+      fmt: v => v.toFixed(0), series,
+    });
+    document.getElementById("saelegend").innerHTML = series
+      .map((x, i) => `<span><i style="background:var(${x.color})"></i>${x.name}</span>`).join("")
+      + `<span>ceiling ${M.d_model} = d_model, whatever the dictionary size</span>`;
+
+    const esc2 = t => t.replace(/\s+/g, " ")
+                       .replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    const feats = fs => fs.map(f =>
+      `<code class="chip">#${f.f} ${esc2(f.tokens.slice(0, 3).join(""))}</code>`).join("");
+    const host = document.getElementById("saetable");
+    for (const t of saeTags) {
+      const S = LENSES[t].sae;
+      const rows = S.modes.map((modes, li) => {
+        const m = modes[0];
+        if (!m) return "";
+        return `<tr><td class="name" rowspan="2">L${S.layers[li]}</td>` +
+          `<td rowspan="2">${(m.share * 100).toFixed(0)}%</td>` +
+          `<td class="sign">→</td><td class="toks">${feats(m.source)}</td></tr>` +
+          `<tr><td class="sign">⇒</td><td class="toks">${feats(m.target)}</td></tr>`;
+      }).join("");
+      const p = div("panel", `<div class="kicker">${t} · leading mode per layer</div>`, host);
+      const tb = document.createElement("table");
+      tb.className = "modes";
+      tb.innerHTML =
+        `<tr><th>layer</th><th>mode 1 share</th><th></th><th>source features → target features</th></tr>`
+        + rows;
+      p.appendChild(tb);
+    }
+  }
+
+}
+
+/* ---- model switcher --------------------------------------------------- */
+const MODELS = Object.keys(D.models);
+const bar = document.getElementById("modelbar");
+bar.innerHTML = `<span class="lbl">model</span>` + MODELS
+  .map((m, i) => `<button class="k" data-m="${m}" aria-pressed="${i === 0}">${m}</button>`).join(" ");
+bar.addEventListener("click", ev => {
+  const b = ev.target.closest("button"); if (!b) return;
+  bar.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b));
+  render(b.dataset.m);
+});
+if (MODELS.length < 2) bar.hidden = true;
+render(MODELS[0]);
+</script>
