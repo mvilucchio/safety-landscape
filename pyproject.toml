@@ -14,7 +14,13 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["ipykernel", "jupyter", "ruff", "pytest"]
+dev = [
+    "ipykernel",
+    "jupyter",
+    "ruff",
+    "pytest",
+    "matplotlib>=3.11.2",
+]
 
 # Reference implementation from the paper; not on PyPI.
 [tool.uv.sources]

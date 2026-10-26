@@ -41,6 +41,7 @@ survival) against growing as `e^{εt/T}` (Gompertz). `landscape.py` fits both.
 | `landscape.py` | model-free: potential, Kramers–Moyal drift/diffusion, Ornstein–Uhlenbeck well per time window, Kaplan–Meier survival, fits A/B → `traj/<name>.landscape.json` |
 | `clone.py` | GKTL cloning on one prompt, `k = 0` is brute force on the same budget → `clone/<name>.json` |
 | `test_clone.py` | the estimator against a Gaussian walk whose tail is known in closed form |
+| `plot.py` | the three headline figures from the JSONs → `imgs/*.png` (needs the dev group: matplotlib) |
 | `fit.py` `contrast.py` `analyze.py` `spectrum.py` `sae_map.py` `eval.py` `slice.py` `report.py` `test_cka.py` `test_sae_map.py` | the lens stack — see `LENS.md` |
 | `documents/` | the proposal (gitignored) |
 
@@ -102,6 +103,10 @@ tokens × batch, and `d_model` matters far less than for fitting a lens.
   every run for exactly this.
 
 ## First results, 2026-10-23
+
+![Safety tuning digs the well; temperature lifts it](imgs/well.png)
+![The hazard is constant; temperature multiplies it](imgs/survival.png)
+![Cloning matches brute force at a quarter of the budget, then collapses](imgs/cloning.png)
 
 Four models, the same 731 advice pairs, 128 prompts × 16 samples × 160
 tokens per temperature. Base models and Qwen3-0.6B use the plain rendering,
