@@ -13,6 +13,10 @@ Three constructions, all scored on the same paired safe/harmful responses
   contrast  top right-singular vector of J_diff[l], the layer-l direction
             whose transport differs most between the classes. Needs
             runs/<model>/contrast/lens.pt. Sign aligned to diffmean.
+  coherence mean residual of the same responses with their words shuffled
+            minus the originals: points toward incoherent text. Not a safety
+            axis; it is the confound to measure and remove.
+  diffmean-orth  diffmean with its coherence component projected out.
 
 "Measurable" is decided per layer from the per-response mean projection: d'
 between the classes, AUC, and the fraction of pairs ordered correctly
@@ -33,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import time
 
 import torch
@@ -62,6 +67,20 @@ def response_means(model, tok, rows: list[dict], template: str, max_seq_len: int
     return H
 
 
+def shuffled(rows: list[dict], seed: int = 0) -> list[dict]:
+    """The same rows with the words of each response in random order: same
+    tokens, same topic, no syntax. The contrast against the originals is the
+    coherence direction."""
+    rng = random.Random(seed)
+    out = []
+    for r in rows:
+        words = r["response"].split()
+        rng.shuffle(words)
+        resp = " ".join(words)
+        out.append({**r, "response": resp, "text": r["prefix"] + resp})
+    return out
+
+
 def separation(score: torch.Tensor, y: torch.Tensor, pair: torch.Tensor) -> dict:
     """How well a 1-D score tells harmful (y=-1) from safe (y=+1) responses."""
     h, s = score[y == -1], score[y == 1]
@@ -81,12 +100,15 @@ def unit(v: torch.Tensor) -> torch.Tensor:
     return v / v.norm(dim=-1, keepdim=True).clamp_min(1e-12)
 
 
-def directions(H, y, J: dict | None, V: torch.Tensor | None) -> dict[str, torch.Tensor]:
+def directions(H, y, J: dict | None, V: torch.Tensor | None, H2: torch.Tensor) -> dict[str, torch.Tensor]:
     """{method: [n_layers, d] unit vectors}. J: the web-text lens' {layer: J_l};
-    V: unsigned top right-singular vectors of J_diff, NaN rows where absent."""
+    V: unsigned top right-singular vectors of J_diff, NaN rows where absent;
+    H2: response means of the word-shuffled rows."""
     # u points toward the unsafe class: label -1 is harmful (make_data.py).
     u = unit(H[y == -1].mean(0) - H[y == 1].mean(0))
-    out = {"diffmean": u}
+    c = unit(H2.mean(0) - H.mean(0))  # toward incoherent
+    out = {"diffmean": u, "coherence": c,
+           "diffmean-orth": unit(u - (u * c).sum(1, keepdim=True) * c)}
     if J is not None:  # identity at the final layer, which the lens maps *to*
         w = u[-1]
         out["pullback"] = unit(torch.stack([J[l].T @ w if l in J else w for l in range(len(u))]))
@@ -123,6 +145,7 @@ def main() -> None:
     model, _, tok = jspace.load_model(args.model, device=args.device, dtype=args.dtype)
     print(f"{model} | {len(rows)} responses from {args.data} | {args.template} template")
     H = response_means(model, tok, rows, args.template, args.max_seq_len)
+    H2 = response_means(model, tok, shuffled(rows), args.template, args.max_seq_len)
     y = torch.tensor([int(r["label"]) for r in rows])
     pair = torch.tensor([int(r["pair"]) for r in rows])
     n_layers = model.n_layers
@@ -132,9 +155,9 @@ def main() -> None:
     J = JacobianLens.load(str(base)).jacobians if base.exists() else None
     V = top_singular_vectors(JacobianLens.load(str(contrast)), n_layers, args.device) if contrast.exists() else None
 
-    methods = directions(H, y, J, V)
+    methods = directions(H, y, J, V, H2)
     train, test = pair % 2 == 0, pair % 2 == 1
-    held = directions(H[train], y[train], J, V)
+    held = directions(H[train], y[train], J, V, H2[train])
 
     report, stats = {}, {}
     for m, U in methods.items():

@@ -8,6 +8,9 @@ and clone JSONs under runs/.
                 and the fraction of completions ending above the midpoint vs T
   cloning.png   cloning vs brute force on gemma-2-2b-it, and the collapse of
                 the population as k grows
+  coherence.png the coherence confound: the mean trajectory along the safety
+                axis, the cleaned axis and the coherence axis on gemma-2-2b-it,
+                and the failure rate with and without the coherence component
 """
 
 from __future__ import annotations
@@ -32,8 +35,8 @@ INK, INK2, MUTED, GRID, AXIS, SURFACE = "#0b0b0b", "#52514e", "#898781", "#e1e0d
 OUT = Path("imgs")
 
 
-def landscape(model: str, T: float) -> dict:
-    return json.loads((jspace.model_dir(model) / "traj" / f"all-advice-diffmean-T{T}.landscape.json").read_text())
+def landscape(model: str, T: float, method: str = "diffmean") -> dict:
+    return json.loads((jspace.model_dir(model) / "traj" / f"all-advice-{method}-T{T}.landscape.json").read_text())
 
 
 def z_of(r: dict, s) -> float:
@@ -173,10 +176,61 @@ def cloning() -> None:
     fig.savefig(OUT / "cloning.png", dpi=200)
 
 
+def coherence() -> None:
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4.2), constrained_layout=True)
+    fig.suptitle("The coherence confound: one shuffled-word direction explains part of the T = 1.3 climb, not all of it", x=0.01, ha="left")
+    model = MODELS[1][0]
+    AXES = [("diffmean", "safety axis (diffmean)", "#2a78d6"), ("diffmean-orth", "coherence removed", "#eb6834"),
+            ("coherence", "coherence axis", "#1baf7a")]
+    for ax, T in zip(axes[:2], (1.0, 1.3), strict=True):
+        for method, label, c in AXES:
+            r = landscape(model, T, method)
+            m = np.array(r["mean_t"])
+            ax.plot(np.arange(len(m)), z_of(r, m), color=c, label=label)
+        for y, t, va in ((0, "safe mean", "top"), (1, "harmful mean", "bottom")):
+            ax.axhline(y, color=AXIS, linewidth=0.8)
+            ax.text(len(m) - 1, y, t, ha="right", va=va, fontsize=8, color=MUTED)
+        ax.set_xlabel("generated tokens t")
+        ax.set_title(f"gemma-2-2b-it, mean projection along each axis, T = {T}")
+    axes[0].set_ylabel("mean s_t  (class-gap units of each axis)")
+    lo = min(a.get_ylim()[0] for a in axes[:2])
+    hi = max(a.get_ylim()[1] for a in axes[:2])
+    for a in axes[:2]:
+        a.set_ylim(lo, hi)
+    axes[0].legend(loc="upper left")
+
+    b = axes[2]
+    floor = 1 / 2048
+    for model, label, c in MODELS:
+        for method, lw, fill in (("diffmean", 2, True), ("diffmean-orth", 1.2, False)):
+            try:
+                f = np.array([landscape(model, T, method)["survival_cummean"]["final_above"] for T in TEMPS])
+            except FileNotFoundError:
+                continue
+            shown = np.maximum(f, floor)
+            b.plot(TEMPS, shown, color=c, linewidth=lw, label=label if fill else None)
+            for T, v, s in zip(TEMPS, f, shown, strict=True):
+                b.plot([T], [s], marker="o", markersize=7, linestyle="none", markeredgewidth=2,
+                       markerfacecolor=c if (fill and v > 0) else SURFACE, markeredgecolor=SURFACE if (fill and v > 0) else c)
+    b.plot([], [], color=INK2, linewidth=2, label="original axis (filled)")
+    b.plot([], [], color=INK2, linewidth=1.2, label="coherence removed (open)")
+    b.axhline(floor, color=AXIS, linewidth=0.8)
+    b.text(TEMPS[-1], floor, "none of 2048", ha="right", va="bottom", fontsize=8, color=MUTED)
+    b.set_yscale("log")
+    b.set_xticks(TEMPS)
+    b.set_xlim(0.6, 1.4)
+    b.set_xlabel("sampling temperature T")
+    b.set_ylabel("fraction of completions ending above s*")
+    b.set_title("Failure rate: original vs cleaned axis")
+    b.legend(loc="center left", fontsize=8)
+    fig.savefig(OUT / "coherence.png", dpi=200)
+
+
 if __name__ == "__main__":
     style()
     OUT.mkdir(exist_ok=True)
     well()
     survival()
     cloning()
+    coherence()
     print("wrote", ", ".join(str(p) for p in sorted(OUT.glob("*.png"))))

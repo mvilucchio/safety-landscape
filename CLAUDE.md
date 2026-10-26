@@ -36,12 +36,12 @@ survival) against growing as `e^{εt/T}` (Gompertz). `landscape.py` fits both.
 |---|---|
 | `jspace.py` | model loading, run paths, contrast-row rendering (plain or chat template), axis loading, generation helpers: pure-T sampling kwargs, EOS masking, projection hooks |
 | `make_data.py` | paired safe/harmful responses → `data/contrast/*.jsonl`: the labels behind every axis |
-| `axes.py` | per-layer directions `diffmean`, `pullback` (needs `base/lens.pt`), `contrast` (needs `contrast/lens.pt`); held-out d', AUC, pair accuracy; class means for `s*`; `--template plain\|chat` → `axes/<set>.{pt,json}` |
+| `axes.py` | per-layer directions `diffmean`, `coherence` (word-shuffled minus original), `diffmean-orth` (coherence projected out), `pullback` (needs `base/lens.pt`), `contrast` (needs `contrast/lens.pt`); held-out d', AUC, pair accuracy; class means for `s*`; `--template plain\|chat` → `axes/<set>.{pt,json}` |
 | `trajectory.py` | sample at temperature T, record `s[n, t, l]` for every layer → `traj/<name>.pt` |
 | `landscape.py` | model-free: potential, Kramers–Moyal drift/diffusion, Ornstein–Uhlenbeck well per time window, Kaplan–Meier survival, fits A/B → `traj/<name>.landscape.json` |
 | `clone.py` | GKTL cloning on one prompt, `k = 0` is brute force on the same budget → `clone/<name>.json` |
 | `test_clone.py` | the estimator against a Gaussian walk whose tail is known in closed form |
-| `plot.py` | the three headline figures from the JSONs → `imgs/*.png` (needs the dev group: matplotlib) |
+| `plot.py` | the four headline figures from the JSONs → `imgs/*.png` (needs the dev group: matplotlib) |
 | `fit.py` `contrast.py` `analyze.py` `spectrum.py` `sae_map.py` `eval.py` `slice.py` `report.py` `test_cka.py` `test_sae_map.py` | the lens stack — see `LENS.md` |
 | `documents/` | the proposal (gitignored) |
 
@@ -107,6 +107,7 @@ tokens × batch, and `d_model` matters far less than for fitting a lens.
 ![Safety tuning digs the well; temperature lifts it](imgs/well.png)
 ![The hazard is constant; temperature multiplies it](imgs/survival.png)
 ![Cloning matches brute force at a quarter of the budget, then collapses](imgs/cloning.png)
+![The coherence confound, measured and partly removed](imgs/coherence.png)
 
 Four models, the same 731 advice pairs, 128 prompts × 16 samples × 160
 tokens per temperature. Base models and Qwen3-0.6B use the plain rendering,
@@ -145,8 +146,49 @@ completions whose running mean ends above the midpoint:
 - **Two confounds to read before any number.** The well bottom rises within
   a careful answer (gemma-it: −41 early, −33 late at T = 1): disclaimer first,
   medical content later, not erosion. And at T = 1.3 the highest-scoring
-  completions are word salad on every model: degenerate text sits on the
-  unsafe side of the axis.
+  completions along `diffmean` are word salad on every model.
+
+**The coherence confound, measured (2026-10-26).** `axes.py` also builds a
+coherence axis (the same responses with their words shuffled, minus the
+originals; it points toward incoherent text) and `diffmean-orth`, the safety
+axis with that component projected out.
+
+- `cos(diffmean, coherence)` is 0.2 to 0.3 at the working layers on all four
+  models: the safety axis carries a coherence component, 5 to 10% of its
+  energy.
+- The coherence axis alone separates graded-harmful from graded-safe
+  responses, held-out d' 1.9 (gemma, Qwen3) to 2.4 (Qwen2.5-7B). In this
+  dataset "harmful" and "less coherent" are correlated.
+- Projecting coherence out costs nothing: held-out d' 3.69 / 3.64 / 3.52 /
+  3.23 against 3.60 / 3.61 / 3.54 / 3.21.
+- Along the cleaned axis the landscape results stand. Qwen2.5-7B is
+  unchanged (z −0.24 / −0.22 / −0.16, failure fraction 0.000 / 0.001 / 0.011).
+  gemma-it stays at or below the safe mean at T ≤ 1 (0.000 / 0.002) and its
+  T = 1.3 climb shrinks by a third (0.20 instead of 0.36); base gemma stays on
+  the harmful side (0.34 / 0.81 / 0.98). The coherence axis itself explodes at
+  T = 1.3 (its mean rises 5 gap-units across a response).
+- The coherence axis is itself a proxy: it also rises along perfectly
+  coherent answers at T = 1 (later parts of an answer are lists, which look
+  more "shuffled"), so it carries format as well as coherence.
+- What sits at the top of the cleaned ranking is no longer gibberish: at
+  T = 1.3 it is coherent, over-confident advice; at T = 1.0 it is the
+  job-interview-scam prompts. The residual confounds are topic and tone.
+- Cloning on gemma-it along the cleaned axis, midpoint target, prompt 3:
+  0 hits in 768 brute force; k = 0.05 and 0.1 give 2e-4 and 8e-4 with the
+  three runs disagreeing, so the cleaned event on this prompt is around 5e-4
+  and not yet resolved at this budget.
+
+**What can be said, and what cannot.** Can: safety post-training moves the
+model's own completions from the harmful side of a graded safe/harmful axis
+to below the safe mean, on the same prompts, and temperature moves them back
+up; this survives removing one coherence direction. The within-response
+hazard is constant over 160 tokens. Cloning reproduces a brute-force
+reference at a quarter of the budget. Cannot: that the axis is *harm* rather
+than confident content or topic (the graders' labels correlate with both);
+that the T = 1.3 climb is harm (a third of it was coherence, the rest is
+unverified); anything about erosion (no multi-turn data); any number below
+about 1e-3 (the tilt still selects artifacts first). A judge or a
+program-checked task is needed before any of those.
 
 **Cloning**, event "mean score over 128 tokens ≥ a", prompt 3 (a
 vaccination side-effect question), 256 walkers × 8 blocks × 16 tokens, 3
@@ -186,9 +228,9 @@ runs per k:
   clone JSONs have no page. No plotting library is installed.
 - **Post-training checkpoints** of one family (OLMo 2 / Tülu 3: SFT, DPO,
   RL) for the recipe comparison of WP3; here only base vs final instruct.
-- **A coherence-aware score.** The diffmean axis rewards degenerate text, so
-  the tilt finds gibberish before harmful advice. A judge, a perplexity
-  penalty or a second axis is needed before pushing cloning below 1e-3.
+- **A judged or program-checked score.** One shuffled-word direction removes
+  part of the coherence confound; topic and tone remain. Needed before
+  pushing cloning below 1e-3 or calling the axis "harm".
 
 ## Conventions
 
